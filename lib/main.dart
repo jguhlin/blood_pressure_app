@@ -17,7 +17,8 @@ class BPApp extends StatelessWidget {
 }
 
 class LatestBPPage extends StatefulWidget {
-  const LatestBPPage({super.key});
+  final bool autoFetch;
+  const LatestBPPage({super.key, this.autoFetch = true});
   @override
   State<LatestBPPage> createState() => _LatestBPPageState();
 }
@@ -37,7 +38,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
     super.initState();
     _rangeEnd = DateTime.now();
     _rangeStart = _rangeEnd.subtract(Duration(days: _rangeDays));
-    _fetchData();
+    if (widget.autoFetch) _fetchData();
   }
 
   Future<void> _fetchData() async {
@@ -230,6 +231,19 @@ class _LatestBPPageState extends State<LatestBPPage> {
               ],
             ),
             const SizedBox(height: 12),
+            // Legend: systolic/diastolic with units
+            Row(
+              children: const [
+                _LegendDot(color: Colors.red),
+                SizedBox(width: 6),
+                Text('Systolic (mmHg)'),
+                SizedBox(width: 16),
+                _LegendDot(color: Colors.blue),
+                SizedBox(width: 6),
+                Text('Diastolic (mmHg)'),
+              ],
+            ),
+            const SizedBox(height: 8),
             if (_series.isNotEmpty)
               SizedBox(
                 height: 240,
@@ -264,21 +278,24 @@ class _LatestTable extends StatelessWidget {
   const _LatestTable({required this.entry});
   @override
   Widget build(BuildContext context) {
-    return DataTable(columns: const [
-      DataColumn(label: Text('Date')),
-      DataColumn(label: Text('Time')),
-      DataColumn(label: Text('Systolic')),
-      DataColumn(label: Text('Diastolic')),
-      DataColumn(label: Text('Source')),
-    ], rows: [
-      DataRow(cells: [
-        DataCell(Text(_formatDate(entry?.timestamp))),
-        DataCell(Text(_formatTime(entry?.timestamp))),
-        DataCell(Text(entry?.systolic?.toStringAsFixed(0) ?? '-')),
-        DataCell(Text(entry?.diastolic?.toStringAsFixed(0) ?? '-')),
-        DataCell(Text(entry?.source ?? '-')),
-      ])
-    ]);
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: DataTable(columns: const [
+        DataColumn(label: Text('Date')),
+        DataColumn(label: Text('Time')),
+        DataColumn(label: Text('Systolic (mmHg)')),
+        DataColumn(label: Text('Diastolic (mmHg)')),
+        DataColumn(label: Text('Source')),
+      ], rows: [
+        DataRow(cells: [
+          DataCell(Text(_formatDate(entry?.timestamp))),
+          DataCell(Text(_formatTime(entry?.timestamp))),
+          DataCell(Text(entry?.systolic?.toStringAsFixed(0) ?? '-')),
+          DataCell(Text(entry?.diastolic?.toStringAsFixed(0) ?? '-')),
+          DataCell(Text(entry?.source ?? '-')),
+        ])
+      ]),
+    );
   }
 
   String _formatDate(DateTime? t) {
@@ -348,6 +365,8 @@ class _TrendChart extends StatelessWidget {
                 );
               },
             ),
+            axisNameWidget: const Text('Date'),
+            axisNameSize: 16,
           ),
           topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
           rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
@@ -355,20 +374,35 @@ class _TrendChart extends StatelessWidget {
         lineBarsData: [
           LineChartBarData(
             spots: sysSpots,
-            isCurved: false,
+            isCurved: true,
+            curveSmoothness: 0.15,
             color: Colors.red,
             barWidth: 2,
             dotData: const FlDotData(show: false),
           ),
           LineChartBarData(
             spots: diaSpots,
-            isCurved: false,
+            isCurved: true,
+            curveSmoothness: 0.15,
             color: Colors.blue,
             barWidth: 2,
             dotData: const FlDotData(show: false),
           ),
         ],
-        lineTouchData: const LineTouchData(enabled: true),
+        lineTouchData: LineTouchData(
+          enabled: true,
+          touchTooltipData: LineTouchTooltipData(
+            getTooltipItems: (spots) {
+              return spots.map((barSpot) {
+                final days = barSpot.x;
+                final dt = start.add(Duration(days: days.round()));
+                final value = barSpot.y;
+                final label = '${dt.month}/${dt.day}  •  ${value.toStringAsFixed(0)} mmHg';
+                return LineTooltipItem(label, TextStyle(color: barSpot.bar.color ?? Colors.black));
+              }).toList();
+            },
+          ),
+        ),
         borderData: FlBorderData(
           show: true,
           border: const Border(
@@ -380,5 +414,14 @@ class _TrendChart extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _LegendDot extends StatelessWidget {
+  final Color color;
+  const _LegendDot({required this.color});
+  @override
+  Widget build(BuildContext context) {
+    return Container(width: 12, height: 12, decoration: BoxDecoration(color: color, shape: BoxShape.circle));
   }
 }
