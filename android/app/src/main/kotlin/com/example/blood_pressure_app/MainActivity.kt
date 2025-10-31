@@ -1,5 +1,6 @@
 package com.example.blood_pressure_app
 
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 
-class MainActivity : FlutterActivity()
+// Extends FlutterFragmentActivity for Health Connect permission flows
+class MainActivity : FlutterFragmentActivity()

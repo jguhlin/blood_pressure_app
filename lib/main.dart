@@ -1,122 +1,257 @@
 import 'package:flutter/material.dart';
+import 'package:health/health.dart';
 
-void main() {
-  runApp(const MyApp());
-}
+void main() => runApp(const BPApp());
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  // This widget is the root of your application.
+class BPApp extends StatelessWidget {
+  const BPApp({super.key});
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-      ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      title: 'Blood Pressure',
+      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.red)),
+      home: const LatestBPPage(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
-
+class LatestBPPage extends StatefulWidget {
+  const LatestBPPage({super.key});
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<LatestBPPage> createState() => _LatestBPPageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _LatestBPPageState extends State<LatestBPPage> {
+  final Health _health = Health();
+  bool _loading = false;
+  String? _error;
+  _BPEntry? _latest;
 
-  void _incrementCounter() {
+  @override
+  void initState() {
+    super.initState();
+    _fetchLatest();
+  }
+
+  Future<void> _fetchLatest() async {
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+      _loading = true;
+      _error = null;
     });
+    try {
+      await _health.configure();
+      final types = <HealthDataType>[
+        HealthDataType.BLOOD_PRESSURE_SYSTOLIC,
+        HealthDataType.BLOOD_PRESSURE_DIASTOLIC,
+      ];
+      final permissions = <HealthDataAccess>[
+        HealthDataAccess.READ,
+        HealthDataAccess.READ,
+      ];
+
+      final hasPerm = await _health.hasPermissions(types, permissions: permissions) ?? false;
+      if (!hasPerm) {
+        final granted = await _health.requestAuthorization(types, permissions: permissions);
+        if (!granted) {
+          setState(() {
+            _loading = false;
+            _error = 'Health permission not granted';
+          });
+          return;
+        }
+      }
+
+      DateTime end = DateTime.now();
+      DateTime start = end.subtract(const Duration(days: 30));
+      var points = await _health.getHealthDataFromTypes(start, end, types);
+
+      // If nothing in last 30 days, try requesting history permission and extend window
+      if (points.isEmpty) {
+        try {
+          final histGranted = await _health.requestHealthDataHistoryAuthorization();
+          if (histGranted) {
+            start = end.subtract(const Duration(days: 365));
+            points = await _health.getHealthDataFromTypes(start, end, types);
+          }
+        } catch (_) {
+          // Ignore; not all platforms/versions support this call
+        }
+      }
+
+      final latest = _combineLatestBP(points);
+      setState(() {
+        _latest = latest;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  _BPEntry? _combineLatestBP(List<HealthDataPoint> points) {
+    if (points.isEmpty) return null;
+    points.sort((a, b) => (b.dateTo).compareTo(a.dateTo));
+
+    final systolic = <HealthDataPoint>[];
+    final diastolic = <HealthDataPoint>[];
+    for (final p in points) {
+      if (p.type == HealthDataType.BLOOD_PRESSURE_SYSTOLIC) systolic.add(p);
+      if (p.type == HealthDataType.BLOOD_PRESSURE_DIASTOLIC) diastolic.add(p);
+    }
+    if (systolic.isEmpty && diastolic.isEmpty) return null;
+
+    HealthDataPoint? bestSys = systolic.isNotEmpty ? systolic.first : null;
+    HealthDataPoint? matchDia;
+    if (bestSys != null) {
+      matchDia = _findClosest(diastolic, bestSys.dateTo);
+    }
+    // Fallback: if no systolic or no close match, pick independent latest values
+    bestSys ??= systolic.isNotEmpty ? systolic.first : null;
+    matchDia ??= diastolic.isNotEmpty ? diastolic.first : null;
+
+    final ts = _mostRecentTime([bestSys?.dateTo, matchDia?.dateTo]);
+    return _BPEntry(
+      timestamp: ts,
+      systolic: _toDouble(bestSys?.value),
+      diastolic: _toDouble(matchDia?.value),
+      source: bestSys?.sourceId ?? matchDia?.sourceId,
+    );
+  }
+
+  HealthDataPoint? _findClosest(List<HealthDataPoint> list, DateTime t) {
+    if (list.isEmpty) return null;
+    HealthDataPoint? best;
+    var bestDelta = const Duration(days: 365);
+    for (final p in list) {
+      final d = (p.dateTo.difference(t)).abs();
+      if (d < bestDelta) {
+        bestDelta = d;
+        best = p;
+      }
+      if (bestDelta <= const Duration(minutes: 10)) break; // close enough
+    }
+    return best;
+  }
+
+  DateTime? _mostRecentTime(List<DateTime?> times) {
+    DateTime? r;
+    for (final t in times) {
+      if (t == null) continue;
+      if (r == null || t.isAfter(r)) r = t;
+    }
+    return r;
+  }
+
+  double? _toDouble(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toDouble();
+    try {
+      // Some plugin versions wrap numeric types; fallback to parsing
+      return double.parse(value.toString());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String _formatDate(DateTime? t) {
+    if (t == null) return '-';
+    final d = t.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${d.year}-${two(d.month)}-${two(d.day)}';
+  }
+
+  String _formatTime(DateTime? t) {
+    if (t == null) return '-';
+    final d = t.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(d.hour)}:${two(d.minute)}';
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+        title: const Text('Latest Blood Pressure'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loading ? null : _fetchLatest,
+            tooltip: 'Refresh',
+          ),
+        ],
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
+      body: Padding(
+        padding: const EdgeInsets.all(16),
         child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (_loading) const LinearProgressIndicator(),
+            const SizedBox(height: 12),
+            if (_error != null)
+              Text(
+                _error!,
+                style: const TextStyle(color: Colors.red),
+              ),
+            const Text('Latest entry (if available):', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            _LatestTable(entry: _latest),
+            const Spacer(),
+            const Text(
+              'Note: Health Connect access may initially show recent data only. '\
+              'If no result appears, try granting history access when prompted.',
+              style: TextStyle(fontSize: 12, color: Colors.black54),
             ),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
+}
+
+class _LatestTable extends StatelessWidget {
+  final _BPEntry? entry;
+  const _LatestTable({required this.entry});
+  @override
+  Widget build(BuildContext context) {
+    return DataTable(columns: const [
+      DataColumn(label: Text('Date')),
+      DataColumn(label: Text('Time')),
+      DataColumn(label: Text('Systolic')),
+      DataColumn(label: Text('Diastolic')),
+      DataColumn(label: Text('Source')),
+    ], rows: [
+      DataRow(cells: [
+        DataCell(Text(_formatDate(entry?.timestamp))),
+        DataCell(Text(_formatTime(entry?.timestamp))),
+        DataCell(Text(entry?.systolic?.toStringAsFixed(0) ?? '-')),
+        DataCell(Text(entry?.diastolic?.toStringAsFixed(0) ?? '-')),
+        DataCell(Text(entry?.source ?? '-')),
+      ])
+    ]);
+  }
+
+  String _formatDate(DateTime? t) {
+    if (t == null) return '-';
+    final d = t.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${d.year}-${two(d.month)}-${two(d.day)}';
+  }
+
+  String _formatTime(DateTime? t) {
+    if (t == null) return '-';
+    final d = t.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(d.hour)}:${two(d.minute)}';
+  }
+}
+
+class _BPEntry {
+  final DateTime? timestamp;
+  final double? systolic;
+  final double? diastolic;
+  final String? source;
+  const _BPEntry({this.timestamp, this.systolic, this.diastolic, this.source});
 }
