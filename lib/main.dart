@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:health/health.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'dart:math' as math;
 
 void main() => runApp(const BPApp());
 
@@ -30,8 +31,10 @@ class _LatestBPPageState extends State<LatestBPPage> {
   _BPEntry? _latest;
   List<_BPEntry> _series = const [];
   int _rangeDays = 30;
+  bool _isCustomRange = false;
   late DateTime _rangeEnd;
   late DateTime _rangeStart;
+  _ViewMode _mode = _ViewMode.trend;
 
   @override
   void initState() {
@@ -70,7 +73,9 @@ class _LatestBPPageState extends State<LatestBPPage> {
       }
 
       _rangeEnd = DateTime.now();
-      _rangeStart = _rangeEnd.subtract(Duration(days: _rangeDays));
+      if (!_isCustomRange) {
+        _rangeStart = _rangeEnd.subtract(Duration(days: _rangeDays));
+      }
       var points = await _health.getHealthDataFromTypes(
         types: types,
         startTime: _rangeStart,
@@ -82,7 +87,9 @@ class _LatestBPPageState extends State<LatestBPPage> {
         try {
           final histGranted = await _health.requestHealthDataHistoryAuthorization();
           if (histGranted) {
-            _rangeStart = _rangeEnd.subtract(const Duration(days: 365));
+            if (!_isCustomRange) {
+              _rangeStart = _rangeEnd.subtract(const Duration(days: 365));
+            }
             points = await _health.getHealthDataFromTypes(
               types: types,
               startTime: _rangeStart,
@@ -207,30 +214,74 @@ class _LatestBPPageState extends State<LatestBPPage> {
           children: [
             if (_loading) const LinearProgressIndicator(),
             const SizedBox(height: 12),
+            // Range and mode selectors
             Row(
               children: [
                 const Text('Range:'),
                 const SizedBox(width: 8),
                 ToggleButtons(
                   isSelected: [
-                    _rangeDays == 30,
-                    _rangeDays == 90,
+                    _rangeDays == 7 && !_isCustomRange,
+                    _rangeDays == 30 && !_isCustomRange,
+                    _rangeDays == 90 && !_isCustomRange,
                   ],
                   onPressed: (i) {
-                    final days = i == 0 ? 30 : 90;
-                    if (days != _rangeDays) {
-                      setState(() => _rangeDays = days);
-                      _fetchData();
-                    }
+                    final days = i == 0 ? 7 : i == 1 ? 30 : 90;
+                    setState(() {
+                      _isCustomRange = false;
+                      _rangeDays = days;
+                    });
+                    _fetchData();
                   },
                   children: const [
+                    Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('7d')),
                     Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('30d')),
                     Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('90d')),
                   ],
                 ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final picked = await showDateRangePicker(
+                      context: context,
+                      firstDate: DateTime.now().subtract(const Duration(days: 365 * 5)),
+                      lastDate: DateTime.now(),
+                      initialDateRange: DateTimeRange(start: _rangeStart, end: _rangeEnd),
+                    );
+                    if (picked != null) {
+                      setState(() {
+                        _isCustomRange = true;
+                        _rangeStart = DateTime(picked.start.year, picked.start.month, picked.start.day);
+                        _rangeEnd = DateTime(picked.end.year, picked.end.month, picked.end.day, 23, 59, 59);
+                      });
+                      _fetchData();
+                    }
+                  },
+                  icon: const Icon(Icons.date_range, size: 18),
+                  label: Text(_isCustomRange ? 'Custom' : 'Custom...'),
+                ),
               ],
             ),
             const SizedBox(height: 12),
+            Row(
+              children: [
+                const Text('View:'),
+                const SizedBox(width: 8),
+                ToggleButtons(
+                  isSelected: [
+                    _mode == _ViewMode.trend,
+                    _mode == _ViewMode.averageDay,
+                  ],
+                  onPressed: (i) {
+                    setState(() => _mode = i == 0 ? _ViewMode.trend : _ViewMode.averageDay);
+                  },
+                  children: const [
+                    Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('Trend')),
+                    Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('Average Day')),
+                  ],
+                ),
+              ],
+            ),
             // Legend: systolic/diastolic with units
             Row(
               children: const [
@@ -246,11 +297,13 @@ class _LatestBPPageState extends State<LatestBPPage> {
             const SizedBox(height: 8),
             if (_series.isNotEmpty)
               SizedBox(
-                height: 240,
-                child: _TrendChart(series: _series, start: _rangeStart, end: _rangeEnd),
+                height: 260,
+                child: _mode == _ViewMode.trend
+                    ? _TrendChart(series: _series, start: _rangeStart, end: _rangeEnd)
+                    : _AverageDayChart(series: _series),
               )
             else
-              const Text('No trend data available for selected range.'),
+              const Text('No data available for selected range.'),
             const SizedBox(height: 16),
             if (_error != null)
               Text(
@@ -416,6 +469,205 @@ class _TrendChart extends StatelessWidget {
     );
   }
 }
+
+class _AverageDayChart extends StatelessWidget {
+  final List<_BPEntry> series;
+  const _AverageDayChart({required this.series});
+
+  @override
+  Widget build(BuildContext context) {
+    final agg = _AverageDayAggregator(series: series).compute(stepMinutes: 15, smoothMinutes: 45);
+    final sysSpots = <FlSpot>[];
+    final diaSpots = <FlSpot>[];
+    for (int i = 0; i < agg.minutes.length; i++) {
+      final x = agg.minutes[i] / 60.0; // hours
+      final s = agg.sysMean[i];
+      final d = agg.diaMean[i];
+      if (s != null) sysSpots.add(FlSpot(x, s));
+      if (d != null) diaSpots.add(FlSpot(x, d));
+    }
+
+    return LineChart(
+      LineChartData(
+        minX: 0,
+        maxX: 24,
+        minY: 40,
+        maxY: 200,
+        gridData: const FlGridData(show: true, drawVerticalLine: true),
+        titlesData: FlTitlesData(
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(showTitles: true, reservedSize: 36, interval: 20),
+            axisNameWidget: const Text('mmHg'),
+            axisNameSize: 18,
+          ),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              interval: 3,
+              getTitlesWidget: (value, meta) {
+                return SideTitleWidget(meta: meta, child: Text('${value.round()}h'));
+              },
+            ),
+            axisNameWidget: const Text('Time of Day'),
+            axisNameSize: 16,
+          ),
+          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        ),
+        lineBarsData: [
+          LineChartBarData(
+            spots: sysSpots,
+            isCurved: true,
+            curveSmoothness: 0.25,
+            color: Colors.red,
+            barWidth: 2,
+            dotData: const FlDotData(show: false),
+          ),
+          LineChartBarData(
+            spots: diaSpots,
+            isCurved: true,
+            curveSmoothness: 0.25,
+            color: Colors.blue,
+            barWidth: 2,
+            dotData: const FlDotData(show: false),
+          ),
+        ],
+        borderData: FlBorderData(
+          show: true,
+          border: const Border(
+            left: BorderSide(color: Colors.black12),
+            bottom: BorderSide(color: Colors.black12),
+            right: BorderSide(color: Colors.transparent),
+            top: BorderSide(color: Colors.transparent),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AverageDayAggregator {
+  final List<_BPEntry> series;
+  _AverageDayAggregator({required this.series});
+
+  _AvgDay compute({int stepMinutes = 15, int smoothMinutes = 45}) {
+    final step = stepMinutes;
+    final bins = (24 * 60) ~/ step;
+    final days = <DateTime, _DayBins>{};
+
+    double clamp(double v) => v.clamp(40.0, 220.0);
+
+    for (final e in series) {
+      final t = e.timestamp;
+      if (t == null) continue;
+      final dayKey = DateTime(t.year, t.month, t.day);
+      final d = days.putIfAbsent(dayKey, () => _DayBins(bins));
+      final m = t.hour * 60 + t.minute + t.second / 60.0;
+      final f = m / step;
+      int i0 = f.floor();
+      final frac = f - i0;
+      int i1 = (i0 + 1) % bins;
+      if (i0 >= bins) i0 = bins - 1;
+
+      if (e.systolic != null) {
+        final v = clamp(e.systolic!);
+        d.sysSum[i0] += v * (1 - frac);
+        d.sysW[i0] += (1 - frac);
+        d.sysSum[i1] += v * frac;
+        d.sysW[i1] += frac;
+      }
+      if (e.diastolic != null) {
+        final v = clamp(e.diastolic!);
+        d.diaSum[i0] += v * (1 - frac);
+        d.diaW[i0] += (1 - frac);
+        d.diaSum[i1] += v * frac;
+        d.diaW[i1] += frac;
+      }
+    }
+
+    // Per-day means per bin
+    final perDaySys = <List<double?>>[];
+    final perDayDia = <List<double?>>[];
+    for (final d in days.values) {
+      final sys = List<double?>.filled(bins, null);
+      final dia = List<double?>.filled(bins, null);
+      for (int i = 0; i < bins; i++) {
+        if (d.sysW[i] > 0) sys[i] = d.sysSum[i] / d.sysW[i];
+        if (d.diaW[i] > 0) dia[i] = d.diaSum[i] / d.diaW[i];
+      }
+      perDaySys.add(sys);
+      perDayDia.add(dia);
+    }
+
+    List<double?> avgOfDays(List<List<double?>> perDay) {
+      final out = List<double?>.filled(bins, null);
+      for (int i = 0; i < bins; i++) {
+        double sum = 0;
+        int n = 0;
+        for (final day in perDay) {
+          final v = day[i];
+          if (v != null) {
+            sum += v;
+            n++;
+          }
+        }
+        if (n > 0) out[i] = sum / n;
+      }
+      return out;
+    }
+
+    final sysMean = avgOfDays(perDaySys);
+    final diaMean = avgOfDays(perDayDia);
+
+    // Circular Gaussian smoothing
+    List<double?> smooth(List<double?> src) {
+      final sigmaBins = (smoothMinutes / step).clamp(1, 12).toDouble();
+      final radius = (sigmaBins * 3).ceil();
+      final out = List<double?>.filled(bins, null);
+      for (int i = 0; i < bins; i++) {
+        double wsum = 0, vsum = 0;
+        for (int off = -radius; off <= radius; off++) {
+          final j = (i + off) % bins;
+          final jj = j < 0 ? j + bins : j;
+          final v = src[jj];
+          if (v == null) continue;
+          final w = math.exp(-(off * off) / (2 * sigmaBins * sigmaBins));
+          vsum += w * v;
+          wsum += w;
+        }
+        if (wsum > 0) out[i] = vsum / wsum;
+      }
+      return out;
+    }
+
+    final sysSmooth = smooth(sysMean);
+    final diaSmooth = smooth(diaMean);
+
+    final minutes = List<int>.generate(bins, (i) => i * step);
+    return _AvgDay(minutes: minutes, sysMean: sysSmooth, diaMean: diaSmooth);
+  }
+}
+
+class _DayBins {
+  final List<double> sysSum;
+  final List<double> diaSum;
+  final List<double> sysW;
+  final List<double> diaW;
+  _DayBins(int bins)
+      : sysSum = List.filled(bins, 0),
+        diaSum = List.filled(bins, 0),
+        sysW = List.filled(bins, 0),
+        diaW = List.filled(bins, 0);
+}
+
+class _AvgDay {
+  final List<int> minutes; // minutes since midnight
+  final List<double?> sysMean; // smoothed means
+  final List<double?> diaMean;
+  _AvgDay({required this.minutes, required this.sysMean, required this.diaMean});
+}
+
+enum _ViewMode { trend, averageDay }
 
 class _LegendDot extends StatelessWidget {
   final Color color;
