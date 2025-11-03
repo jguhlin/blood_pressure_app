@@ -41,8 +41,12 @@ class _LatestBPPageState extends State<LatestBPPage> {
   // Compare mode state
   DateTimeRange? _rangeA;
   DateTimeRange? _rangeB;
-  _AvgDay? _avgA;
-  _AvgDay? _avgB;
+  List<_BPEntry>? _seriesA;
+  List<_BPEntry>? _seriesB;
+  // Bands + medication anchor
+  bool _showBands = false;
+  bool _anchorToDose = false;
+  TimeOfDay? _doseTime;
 
   @override
   void initState() {
@@ -139,8 +143,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
     setState(() {
       _loading = true;
       _error = null;
-      _avgA = null;
-      _avgB = null;
+      _seriesA = null;
+      _seriesB = null;
     });
     try {
       final ok = await _ensurePermissions();
@@ -205,12 +209,9 @@ class _LatestBPPageState extends State<LatestBPPage> {
       }
       final seriesB = _combineSeries(pointsB);
 
-      final aggA = _AverageDayAggregator(series: seriesA).compute(stepMinutes: 15, smoothMinutes: 45);
-      final aggB = _AverageDayAggregator(series: seriesB).compute(stepMinutes: 15, smoothMinutes: 45);
-
       setState(() {
-        _avgA = aggA;
-        _avgB = aggB;
+        _seriesA = seriesA;
+        _seriesB = seriesB;
         _loading = false;
       });
     } catch (e) {
@@ -322,7 +323,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
           ),
         ],
       ),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -421,10 +422,12 @@ class _LatestBPPageState extends State<LatestBPPage> {
                 ],
               ),
             const SizedBox(height: 12),
-            Row(
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 const Text('View:'),
-                const SizedBox(width: 8),
                 ToggleButtons(
                   isSelected: [
                     _mode == _ViewMode.trend,
@@ -443,6 +446,39 @@ class _LatestBPPageState extends State<LatestBPPage> {
                     Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('Average Day')),
                     Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('Compare')),
                   ],
+                ),
+                Row(children: [
+                  const Text('Bands'),
+                  const SizedBox(width: 6),
+                  Switch(
+                    value: _showBands,
+                    onChanged: (v) => setState(() => _showBands = v),
+                  ),
+                ]),
+                Row(children: [
+                  const Text('Anchor to dose'),
+                  const SizedBox(width: 6),
+                  Switch(
+                    value: _anchorToDose,
+                    onChanged: (v) => setState(() => _anchorToDose = v),
+                  ),
+                ]),
+                OutlinedButton.icon(
+                  onPressed: !_anchorToDose
+                      ? null
+                      : () async {
+                          final picked = await showTimePicker(
+                            context: context,
+                            initialTime: _doseTime ?? const TimeOfDay(hour: 8, minute: 0),
+                          );
+                          if (picked != null) {
+                            setState(() => _doseTime = picked);
+                          }
+                        },
+                  icon: const Icon(Icons.medication),
+                  label: Text(_doseTime == null
+                      ? 'Dose time'
+                      : '${_doseTime!.hour.toString().padLeft(2, '0')}:${_doseTime!.minute.toString().padLeft(2, '0')}'),
                 ),
               ],
             ),
@@ -483,8 +519,13 @@ class _LatestBPPageState extends State<LatestBPPage> {
             if (_mode == _ViewMode.compare)
               SizedBox(
                 height: 260,
-                child: (_avgA != null && _avgB != null)
-                    ? _AverageDayCompareChart(avgA: _avgA!, avgB: _avgB!)
+                child: (_seriesA != null && _seriesB != null)
+                    ? _AverageDayCompareChart(
+                        seriesA: _seriesA!,
+                        seriesB: _seriesB!,
+                        anchorMinute: _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null,
+                        showBands: _showBands,
+                      )
                     : const Center(child: Text('Pick two ranges and tap Fetch.')),
               )
             else if (_series.isNotEmpty)
@@ -492,7 +533,11 @@ class _LatestBPPageState extends State<LatestBPPage> {
                 height: 260,
                 child: _mode == _ViewMode.trend
                     ? _TrendChart(series: _series, start: _rangeStart, end: _rangeEnd)
-                    : _AverageDayChart(series: _series),
+                    : _AverageDayChart(
+                        series: _series,
+                        anchorMinute: _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null,
+                        showBands: _showBands,
+                      ),
               )
             else
               const Text('No data available for selected range.'),
@@ -505,7 +550,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
             const Text('Latest entry (if available):', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             _LatestTable(entry: _latest),
-            const Spacer(),
+            const SizedBox(height: 12),
             const Text(
               'Note: Health Connect access may initially show recent data only. '
               'If no result appears, try granting history access when prompted.',
@@ -549,7 +594,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
           buf.writeln('$m\t$label\t$s\t$d');
         }
       } else if (_mode == _ViewMode.compare) {
-        if (_avgA == null || _avgB == null) {
+        if (_seriesA == null || _seriesB == null) {
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pick two ranges and Fetch first.')));
           return;
@@ -559,16 +604,19 @@ class _LatestBPPageState extends State<LatestBPPage> {
         buf.writeln('rangeA_start\trangeA_end\trangeB_start\trangeB_end');
         buf.writeln('${_rangeA?.start.toIso8601String() ?? ''}\t${_rangeA?.end.toIso8601String() ?? ''}\t${_rangeB?.start.toIso8601String() ?? ''}\t${_rangeB?.end.toIso8601String() ?? ''}');
         buf.writeln('minute_of_day\ttime_label\tA_systolic\tA_diastolic\tB_systolic\tB_diastolic\tDelta_systolic(B-A)\tDelta_diastolic(B-A)');
-        for (int i = 0; i < _avgA!.minutes.length; i++) {
-          final m = _avgA!.minutes[i];
+        final anchorMin = _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null;
+        final aggA = _AverageDayAggregator(series: _seriesA!).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMin);
+        final aggB = _AverageDayAggregator(series: _seriesB!).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMin);
+        for (int i = 0; i < aggA.minutes.length; i++) {
+          final m = aggA.minutes[i];
           final h = (m / 60).floor();
           final min = m % 60;
           String two(int n) => n.toString().padLeft(2, '0');
           final label = '${two(h)}:${two(min)}';
-          final aS = _avgA!.sysMean[i];
-          final aD = _avgA!.diaMean[i];
-          final bS = _avgB!.sysMean[i];
-          final bD = _avgB!.diaMean[i];
+          final aS = aggA.sysMean[i];
+          final aD = aggA.diaMean[i];
+          final bS = aggB.sysMean[i];
+          final bD = aggB.diaMean[i];
           String f(double? v) => v == null ? '' : v.toStringAsFixed(1);
           final dS = (bS != null && aS != null) ? (bS - aS).toStringAsFixed(1) : '';
           final dD = (bD != null && aD != null) ? (bD - aD).toStringAsFixed(1) : '';
@@ -732,11 +780,14 @@ class _TrendChart extends StatelessWidget {
 
 class _AverageDayChart extends StatelessWidget {
   final List<_BPEntry> series;
-  const _AverageDayChart({required this.series});
+  final int? anchorMinute; // minutes since midnight
+  final bool showBands;
+  const _AverageDayChart({required this.series, this.anchorMinute, this.showBands = false});
 
   @override
   Widget build(BuildContext context) {
-    final agg = _AverageDayAggregator(series: series).compute(stepMinutes: 15, smoothMinutes: 45);
+    final agg = _AverageDayAggregator(series: series)
+        .compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMinute, withBands: showBands);
     final sysSpots = <FlSpot>[];
     final diaSpots = <FlSpot>[];
     for (int i = 0; i < agg.minutes.length; i++) {
@@ -746,6 +797,53 @@ class _AverageDayChart extends StatelessWidget {
       if (s != null) sysSpots.add(FlSpot(x, s));
       if (d != null) diaSpots.add(FlSpot(x, d));
     }
+    final sysLower = <FlSpot>[];
+    final sysUpper = <FlSpot>[];
+    final diaLower = <FlSpot>[];
+    final diaUpper = <FlSpot>[];
+    if (showBands && agg.sysLower != null) {
+      for (int i = 0; i < agg.minutes.length; i++) {
+        final x = agg.minutes[i] / 60.0;
+        final loS = agg.sysLower![i];
+        final hiS = agg.sysUpper![i];
+        final loD = agg.diaLower![i];
+        final hiD = agg.diaUpper![i];
+        if (loS != null) sysLower.add(FlSpot(x, loS));
+        if (hiS != null) sysUpper.add(FlSpot(x, hiS));
+        if (loD != null) diaLower.add(FlSpot(x, loD));
+        if (hiD != null) diaUpper.add(FlSpot(x, hiD));
+      }
+    }
+
+    final bars = <LineChartBarData>[];
+    if (showBands && sysLower.isNotEmpty && sysUpper.isNotEmpty) {
+      bars.addAll([
+        LineChartBarData(spots: sysLower, isCurved: true, color: Colors.transparent, barWidth: 0, dotData: const FlDotData(show: false)),
+        LineChartBarData(spots: sysUpper, isCurved: true, color: Colors.transparent, barWidth: 0, dotData: const FlDotData(show: false)),
+      ]);
+    }
+    if (showBands && diaLower.isNotEmpty && diaUpper.isNotEmpty) {
+      bars.addAll([
+        LineChartBarData(spots: diaLower, isCurved: true, color: Colors.transparent, barWidth: 0, dotData: const FlDotData(show: false)),
+        LineChartBarData(spots: diaUpper, isCurved: true, color: Colors.transparent, barWidth: 0, dotData: const FlDotData(show: false)),
+      ]);
+    }
+    bars.add(LineChartBarData(
+      spots: sysSpots,
+      isCurved: true,
+      curveSmoothness: 0.25,
+      color: Colors.red,
+      barWidth: 2,
+      dotData: const FlDotData(show: false),
+    ));
+    bars.add(LineChartBarData(
+      spots: diaSpots,
+      isCurved: true,
+      curveSmoothness: 0.25,
+      color: Colors.blue,
+      barWidth: 2,
+      dotData: const FlDotData(show: false),
+    ));
 
     return LineChart(
       LineChartData(
@@ -774,23 +872,12 @@ class _AverageDayChart extends StatelessWidget {
           topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
           rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         ),
-        lineBarsData: [
-          LineChartBarData(
-            spots: sysSpots,
-            isCurved: true,
-            curveSmoothness: 0.25,
-            color: Colors.red,
-            barWidth: 2,
-            dotData: const FlDotData(show: false),
-          ),
-          LineChartBarData(
-            spots: diaSpots,
-            isCurved: true,
-            curveSmoothness: 0.25,
-            color: Colors.blue,
-            barWidth: 2,
-            dotData: const FlDotData(show: false),
-          ),
+        lineBarsData: bars,
+        betweenBarsData: [
+          if (showBands && sysLower.isNotEmpty && sysUpper.isNotEmpty)
+            BetweenBarsData(fromIndex: 0, toIndex: 1, color: const Color(0x26F44336)),
+          if (showBands && diaLower.isNotEmpty && diaUpper.isNotEmpty)
+            BetweenBarsData(fromIndex: 2, toIndex: 3, color: const Color(0x1F2196F3)),
         ],
         borderData: FlBorderData(
           show: true,
@@ -807,31 +894,43 @@ class _AverageDayChart extends StatelessWidget {
 }
 
 class _AverageDayCompareChart extends StatelessWidget {
-  final _AvgDay avgA;
-  final _AvgDay avgB;
-  const _AverageDayCompareChart({required this.avgA, required this.avgB});
+  final List<_BPEntry> seriesA;
+  final List<_BPEntry> seriesB;
+  final int? anchorMinute; // minutes since midnight
+  final bool showBands;
+  const _AverageDayCompareChart({required this.seriesA, required this.seriesB, this.anchorMinute, this.showBands = false});
 
   @override
   Widget build(BuildContext context) {
+    final aggA = _AverageDayAggregator(series: seriesA)
+        .compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMinute, withBands: showBands);
+    final aggB = _AverageDayAggregator(series: seriesB)
+        .compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMinute, withBands: showBands);
     final aSys = <FlSpot>[];
     final aDia = <FlSpot>[];
     final bSys = <FlSpot>[];
     final bDia = <FlSpot>[];
-    for (int i = 0; i < avgA.minutes.length; i++) {
-      final x = avgA.minutes[i] / 60.0;
-      final s = avgA.sysMean[i];
-      final d = avgA.diaMean[i];
+    for (int i = 0; i < aggA.minutes.length; i++) {
+      final x = aggA.minutes[i] / 60.0;
+      final s = aggA.sysMean[i];
+      final d = aggA.diaMean[i];
       if (s != null) aSys.add(FlSpot(x, s));
       if (d != null) aDia.add(FlSpot(x, d));
     }
-    for (int i = 0; i < avgB.minutes.length; i++) {
-      final x = avgB.minutes[i] / 60.0;
-      final s = avgB.sysMean[i];
-      final d = avgB.diaMean[i];
+    for (int i = 0; i < aggB.minutes.length; i++) {
+      final x = aggB.minutes[i] / 60.0;
+      final s = aggB.sysMean[i];
+      final d = aggB.diaMean[i];
       if (s != null) bSys.add(FlSpot(x, s));
       if (d != null) bDia.add(FlSpot(x, d));
     }
 
+    final bars = <LineChartBarData>[
+      LineChartBarData(spots: aSys, isCurved: true, curveSmoothness: 0.25, color: Colors.red, barWidth: 2, dotData: const FlDotData(show: false)),
+      LineChartBarData(spots: aDia, isCurved: true, curveSmoothness: 0.25, color: Colors.blue, barWidth: 2, dotData: const FlDotData(show: false)),
+      LineChartBarData(spots: bSys, isCurved: true, curveSmoothness: 0.25, color: Colors.orange, barWidth: 2, dotData: const FlDotData(show: false)),
+      LineChartBarData(spots: bDia, isCurved: true, curveSmoothness: 0.25, color: Colors.lightBlue, barWidth: 2, dotData: const FlDotData(show: false)),
+    ];
     return LineChart(
       LineChartData(
         minX: 0,
@@ -857,13 +956,11 @@ class _AverageDayCompareChart extends StatelessWidget {
           topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
           rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         ),
-        lineBarsData: [
-          // A curves
-          LineChartBarData(spots: aSys, isCurved: true, curveSmoothness: 0.25, color: Colors.red, barWidth: 2, dotData: const FlDotData(show: false)),
-          LineChartBarData(spots: aDia, isCurved: true, curveSmoothness: 0.25, color: Colors.blue, barWidth: 2, dotData: const FlDotData(show: false)),
-          // B curves
-          LineChartBarData(spots: bSys, isCurved: true, curveSmoothness: 0.25, color: Colors.orange, barWidth: 2, dotData: const FlDotData(show: false)),
-          LineChartBarData(spots: bDia, isCurved: true, curveSmoothness: 0.25, color: Colors.lightBlue, barWidth: 2, dotData: const FlDotData(show: false)),
+        lineBarsData: bars,
+        betweenBarsData: [
+          // Between-lines shading only (A vs B) for both SBP and DBP
+          BetweenBarsData(fromIndex: 0, toIndex: 2, color: const Color(0x33FFA500)), // SBP A vs B
+          BetweenBarsData(fromIndex: 1, toIndex: 3, color: const Color(0x331E90FF)), // DBP A vs B
         ],
         borderData: FlBorderData(
           show: true,
@@ -883,7 +980,7 @@ class _AverageDayAggregator {
   final List<_BPEntry> series;
   _AverageDayAggregator({required this.series});
 
-  _AvgDay compute({int stepMinutes = 15, int smoothMinutes = 45}) {
+  _AvgDay compute({int stepMinutes = 15, int smoothMinutes = 45, int? anchorMinute, bool withBands = false}) {
     final step = stepMinutes;
     final bins = (24 * 60) ~/ step;
     final days = <DateTime, _DayBins>{};
@@ -895,7 +992,11 @@ class _AverageDayAggregator {
       if (t == null) continue;
       final dayKey = DateTime(t.year, t.month, t.day);
       final d = days.putIfAbsent(dayKey, () => _DayBins(bins));
-      final m = t.hour * 60 + t.minute + t.second / 60.0;
+      var m = t.hour * 60 + t.minute + t.second / 60.0;
+      if (anchorMinute != null) {
+        m = (m - anchorMinute) % 1440;
+        if (m < 0) m += 1440;
+      }
       final f = m / step;
       int i0 = f.floor();
       final frac = f - i0;
@@ -952,6 +1053,40 @@ class _AverageDayAggregator {
     final sysMean = avgOfDays(perDaySys);
     final diaMean = avgOfDays(perDayDia);
 
+    List<int> countOfDays(List<List<double?>> perDay) {
+      final out = List<int>.filled(bins, 0);
+      for (int i = 0; i < bins; i++) {
+        int n = 0;
+        for (final day in perDay) {
+          if (day[i] != null) n++;
+        }
+        out[i] = n;
+      }
+      return out;
+    }
+    List<double?> stdOfDays(List<List<double?>> perDay, List<double?> mean) {
+      final out = List<double?>.filled(bins, null);
+      for (int i = 0; i < bins; i++) {
+        double sum2 = 0;
+        int n = 0;
+        for (final day in perDay) {
+          final v = day[i];
+          if (v != null && mean[i] != null) {
+            final d = v - mean[i]!;
+            sum2 += d * d;
+            n++;
+          }
+        }
+        if (n > 1) out[i] = math.sqrt(sum2 / (n - 1));
+      }
+      return out;
+    }
+
+    final sysN = countOfDays(perDaySys);
+    final diaN = countOfDays(perDayDia);
+    var sysStd = stdOfDays(perDaySys, sysMean);
+    var diaStd = stdOfDays(perDayDia, diaMean);
+
     // Circular Gaussian smoothing
     List<double?> smooth(List<double?> src) {
       final sigmaBins = (smoothMinutes / step).clamp(1, 12).toDouble();
@@ -975,9 +1110,42 @@ class _AverageDayAggregator {
 
     final sysSmooth = smooth(sysMean);
     final diaSmooth = smooth(diaMean);
+    if (withBands) {
+      sysStd = smooth(sysStd);
+      diaStd = smooth(diaStd);
+    }
 
     final minutes = List<int>.generate(bins, (i) => i * step);
-    return _AvgDay(minutes: minutes, sysMean: sysSmooth, diaMean: diaSmooth);
+    List<double?>? lower(List<double?> mean, List<double?> std, List<int> n) {
+      final out = List<double?>.filled(mean.length, null);
+      for (int i = 0; i < mean.length; i++) {
+        if (withBands && mean[i] != null && std[i] != null && n[i] > 1) {
+          final se = std[i]! / math.sqrt(n[i]);
+          out[i] = mean[i]! - 1.96 * se;
+        }
+      }
+      return out;
+    }
+    List<double?>? upper(List<double?> mean, List<double?> std, List<int> n) {
+      final out = List<double?>.filled(mean.length, null);
+      for (int i = 0; i < mean.length; i++) {
+        if (withBands && mean[i] != null && std[i] != null && n[i] > 1) {
+          final se = std[i]! / math.sqrt(n[i]);
+          out[i] = mean[i]! + 1.96 * se;
+        }
+      }
+      return out;
+    }
+
+    return _AvgDay(
+      minutes: minutes,
+      sysMean: sysSmooth,
+      diaMean: diaSmooth,
+      sysLower: withBands ? lower(sysSmooth, sysStd, sysN) : null,
+      sysUpper: withBands ? upper(sysSmooth, sysStd, sysN) : null,
+      diaLower: withBands ? lower(diaSmooth, diaStd, diaN) : null,
+      diaUpper: withBands ? upper(diaSmooth, diaStd, diaN) : null,
+    );
   }
 }
 
@@ -997,7 +1165,19 @@ class _AvgDay {
   final List<int> minutes; // minutes since midnight
   final List<double?> sysMean; // smoothed means
   final List<double?> diaMean;
-  _AvgDay({required this.minutes, required this.sysMean, required this.diaMean});
+  final List<double?>? sysLower; // optional 95% CI lower
+  final List<double?>? sysUpper;
+  final List<double?>? diaLower;
+  final List<double?>? diaUpper;
+  _AvgDay({
+    required this.minutes,
+    required this.sysMean,
+    required this.diaMean,
+    this.sysLower,
+    this.sysUpper,
+    this.diaLower,
+    this.diaUpper,
+  });
 }
 
 enum _ViewMode { trend, averageDay, compare }
