@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() => runApp(const BPApp());
 
@@ -53,7 +54,67 @@ class _LatestBPPageState extends State<LatestBPPage> {
     super.initState();
     _rangeEnd = DateTime.now();
     _rangeStart = _rangeEnd.subtract(Duration(days: _rangeDays));
+    _loadPrefs();
     if (widget.autoFetch) _fetchData();
+  }
+
+  Future<void> _loadPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final anchor = prefs.getBool('anchor_to_dose') ?? false;
+    final doseH = prefs.getInt('dose_hour');
+    final doseM = prefs.getInt('dose_minute');
+    final isCustom = prefs.getBool('is_custom_range') ?? false;
+    final days = prefs.getInt('range_days') ?? _rangeDays;
+    final startIso = prefs.getString('range_start');
+    final endIso = prefs.getString('range_end');
+    final aStartIso = prefs.getString('rangeA_start');
+    final aEndIso = prefs.getString('rangeA_end');
+    final bStartIso = prefs.getString('rangeB_start');
+    final bEndIso = prefs.getString('rangeB_end');
+    if (!mounted) return;
+    setState(() {
+      _anchorToDose = anchor;
+      if (doseH != null && doseM != null) {
+        _doseTime = TimeOfDay(hour: doseH, minute: doseM);
+      }
+      _isCustomRange = isCustom;
+      _rangeDays = days;
+      if (startIso != null && endIso != null) {
+        _rangeStart = DateTime.tryParse(startIso) ?? _rangeStart;
+        _rangeEnd = DateTime.tryParse(endIso) ?? _rangeEnd;
+      }
+      if (aStartIso != null && aEndIso != null) {
+        final aS = DateTime.tryParse(aStartIso);
+        final aE = DateTime.tryParse(aEndIso);
+        if (aS != null && aE != null) _rangeA = DateTimeRange(start: aS, end: aE);
+      }
+      if (bStartIso != null && bEndIso != null) {
+        final bS = DateTime.tryParse(bStartIso);
+        final bE = DateTime.tryParse(bEndIso);
+        if (bS != null && bE != null) _rangeB = DateTimeRange(start: bS, end: bE);
+      }
+    });
+  }
+
+  Future<void> _savePrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('anchor_to_dose', _anchorToDose);
+    if (_doseTime != null) {
+      await prefs.setInt('dose_hour', _doseTime!.hour);
+      await prefs.setInt('dose_minute', _doseTime!.minute);
+    }
+    await prefs.setBool('is_custom_range', _isCustomRange);
+    await prefs.setInt('range_days', _rangeDays);
+    await prefs.setString('range_start', _rangeStart.toIso8601String());
+    await prefs.setString('range_end', _rangeEnd.toIso8601String());
+    if (_rangeA != null) {
+      await prefs.setString('rangeA_start', _rangeA!.start.toIso8601String());
+      await prefs.setString('rangeA_end', _rangeA!.end.toIso8601String());
+    }
+    if (_rangeB != null) {
+      await prefs.setString('rangeB_start', _rangeB!.start.toIso8601String());
+      await prefs.setString('rangeB_end', _rangeB!.end.toIso8601String());
+    }
   }
 
   Future<void> _fetchData() async {
@@ -344,12 +405,13 @@ class _LatestBPPageState extends State<LatestBPPage> {
                     ],
                     onPressed: (i) {
                       final days = i == 0 ? 7 : i == 1 ? 30 : 90;
-                      setState(() {
-                        _isCustomRange = false;
-                        _rangeDays = days;
-                      });
-                      _fetchData();
-                    },
+                    setState(() {
+                      _isCustomRange = false;
+                      _rangeDays = days;
+                    });
+                    _savePrefs();
+                    _fetchData();
+                  },
                     children: const [
                       Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('7d')),
                       Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('30d')),
@@ -366,14 +428,15 @@ class _LatestBPPageState extends State<LatestBPPage> {
                         initialDateRange: DateTimeRange(start: _rangeStart, end: _rangeEnd),
                       );
                       if (picked != null) {
-                        setState(() {
-                          _isCustomRange = true;
-                          _rangeStart = DateTime(picked.start.year, picked.start.month, picked.start.day);
-                          _rangeEnd = DateTime(picked.end.year, picked.end.month, picked.end.day, 23, 59, 59);
-                        });
-                        _fetchData();
-                      }
-                    },
+                      setState(() {
+                        _isCustomRange = true;
+                        _rangeStart = DateTime(picked.start.year, picked.start.month, picked.start.day);
+                        _rangeEnd = DateTime(picked.end.year, picked.end.month, picked.end.day, 23, 59, 59);
+                      });
+                      _savePrefs();
+                      _fetchData();
+                    }
+                  },
                     icon: const Icon(Icons.date_range, size: 18),
                     label: Text(_isCustomRange ? 'Custom' : 'Custom...'),
                   ),
@@ -392,6 +455,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
                       );
                       if (picked != null) {
                         setState(() => _rangeA = picked);
+                        _savePrefs();
                       }
                     },
                     icon: const Icon(Icons.looks_one, size: 18),
@@ -408,6 +472,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
                       );
                       if (picked != null) {
                         setState(() => _rangeB = picked);
+                        _savePrefs();
                       }
                     },
                     icon: const Icon(Icons.looks_two, size: 18),
@@ -460,7 +525,10 @@ class _LatestBPPageState extends State<LatestBPPage> {
                   const SizedBox(width: 6),
                   Switch(
                     value: _anchorToDose,
-                    onChanged: (v) => setState(() => _anchorToDose = v),
+                    onChanged: (v) {
+                      setState(() => _anchorToDose = v);
+                      _savePrefs();
+                    },
                   ),
                 ]),
                 OutlinedButton.icon(
@@ -473,6 +541,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
                           );
                           if (picked != null) {
                             setState(() => _doseTime = picked);
+                            _savePrefs();
                           }
                         },
                   icon: const Icon(Icons.medication),
@@ -541,6 +610,14 @@ class _LatestBPPageState extends State<LatestBPPage> {
               )
             else
               const Text('No data available for selected range.'),
+            const SizedBox(height: 12),
+            _SummaryCards(
+              mode: _mode,
+              series: _series,
+              seriesA: _seriesA,
+              seriesB: _seriesB,
+              anchorMinute: _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null,
+            ),
             const SizedBox(height: 16),
             if (_error != null)
               Text(
@@ -1189,4 +1266,146 @@ class _LegendDot extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(width: 12, height: 12, decoration: BoxDecoration(color: color, shape: BoxShape.circle));
   }
+}
+
+class _SummaryCards extends StatelessWidget {
+  final _ViewMode mode;
+  final List<_BPEntry> series;
+  final List<_BPEntry>? seriesA;
+  final List<_BPEntry>? seriesB;
+  final int? anchorMinute;
+  const _SummaryCards({required this.mode, required this.series, this.seriesA, this.seriesB, this.anchorMinute});
+
+  @override
+  Widget build(BuildContext context) {
+    if (mode == _ViewMode.trend && series.isEmpty) return const SizedBox.shrink();
+    if (mode == _ViewMode.averageDay && series.isEmpty) return const SizedBox.shrink();
+    if (mode == _ViewMode.compare && (seriesA == null || seriesB == null)) return const SizedBox.shrink();
+
+    late final List<_CardData> cards;
+    if (mode == _ViewMode.compare) {
+      final aggA = _AverageDayAggregator(series: seriesA!).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMinute);
+      final aggB = _AverageDayAggregator(series: seriesB!).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMinute);
+      cards = _buildCompareCards(aggA, aggB);
+    } else {
+      final agg = _AverageDayAggregator(series: series).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMinute);
+      cards = _buildSingleCards(agg);
+    }
+
+    return Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      children: [for (final c in cards) _SummaryCard(data: c)],
+    );
+  }
+
+  List<_CardData> _buildSingleCards(_AvgDay agg) {
+    final segs = _segments();
+    return [
+      for (final s in segs)
+        _CardData(
+          title: s.label,
+          sbp: _segMean(agg.minutes, agg.sysMean, s.startMin, s.endMin),
+          dbp: _segMean(agg.minutes, agg.diaMean, s.startMin, s.endMin),
+        )
+    ];
+  }
+
+  List<_CardData> _buildCompareCards(_AvgDay a, _AvgDay b) {
+    final segs = _segments();
+    return [
+      for (final s in segs)
+        _CardData(
+          title: s.label,
+          deltaSbp: _segDelta(a.minutes, a.sysMean, b.minutes, b.sysMean, s.startMin, s.endMin),
+          deltaDbp: _segDelta(a.minutes, a.diaMean, b.minutes, b.diaMean, s.startMin, s.endMin),
+          isDelta: true,
+        )
+    ];
+  }
+
+  double? _segMean(List<int> mins, List<double?> values, int startMin, int endMin) {
+    double sum = 0; int n = 0;
+    for (int i = 0; i < mins.length; i++) {
+      final m = mins[i];
+      if (_inSeg(m, startMin, endMin)) {
+        final v = values[i];
+        if (v != null) { sum += v; n++; }
+      }
+    }
+    return n > 0 ? sum / n : null;
+  }
+
+  double? _segDelta(List<int> amins, List<double?> a, List<int> bmins, List<double?> b, int startMin, int endMin) {
+    // assume same binning; align by minute index
+    final meanA = _segMean(amins, a, startMin, endMin);
+    final meanB = _segMean(bmins, b, startMin, endMin);
+    if (meanA == null || meanB == null) return null;
+    return meanB - meanA;
+  }
+
+  bool _inSeg(int minuteOfDay, int startMin, int endMin) {
+    if (startMin <= endMin) return minuteOfDay >= startMin && minuteOfDay < endMin;
+    // wrap
+    return minuteOfDay >= startMin || minuteOfDay < endMin;
+  }
+
+  List<_Segment> _segments() {
+    // Minutes since midnight; anchor handled upstream
+    return const [
+      _Segment('Morning', 6 * 60, 10 * 60),
+      _Segment('Midday', 10 * 60, 16 * 60),
+      _Segment('Evening', 16 * 60, 22 * 60),
+      _Segment('Night', 22 * 60, 6 * 60), // wraps
+    ];
+  }
+}
+
+class _Segment {
+  final String label; final int startMin; final int endMin;
+  const _Segment(this.label, this.startMin, this.endMin);
+}
+
+class _CardData {
+  final String title;
+  final double? sbp; final double? dbp; // for single
+  final double? deltaSbp; final double? deltaDbp; // for compare
+  final bool isDelta;
+  _CardData({required this.title, this.sbp, this.dbp, this.deltaSbp, this.deltaDbp, this.isDelta = false});
+}
+
+class _SummaryCard extends StatelessWidget {
+  final _CardData data;
+  const _SummaryCard({required this.data});
+  @override
+  Widget build(BuildContext context) {
+    TextStyle h = const TextStyle(fontWeight: FontWeight.bold);
+    return Card(
+      elevation: 0.5,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(data.title, style: h),
+            const SizedBox(height: 6),
+            if (!data.isDelta)
+              Row(children: [
+                Text('SBP: ${_f(data.sbp)} mmHg'), const SizedBox(width: 12),
+                Text('DBP: ${_f(data.dbp)} mmHg'),
+              ])
+            else
+              Row(children: [
+                Text('ΔSBP: ${_fSigned(data.deltaSbp)} mmHg'), const SizedBox(width: 12),
+                Text('ΔDBP: ${_fSigned(data.deltaDbp)} mmHg'),
+              ]),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _f(double? v) => v == null ? '-' : v.toStringAsFixed(0);
+  String _fSigned(double? v) => v == null ? '-' : (v >= 0 ? '+${v.toStringAsFixed(0)}' : v.toStringAsFixed(0));
 }
