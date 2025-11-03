@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:health/health.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'dart:math' as math;
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 void main() => runApp(const BPApp());
 
@@ -312,6 +315,11 @@ class _LatestBPPageState extends State<LatestBPPage> {
             onPressed: _loading ? null : _fetchData,
             tooltip: 'Refresh',
           ),
+          IconButton(
+            icon: const Icon(Icons.ios_share),
+            onPressed: _loading ? null : _exportTsv,
+            tooltip: 'Export TSV',
+          ),
         ],
       ),
       body: Padding(
@@ -507,6 +515,74 @@ class _LatestBPPageState extends State<LatestBPPage> {
         ),
       ),
     );
+  }
+
+  Future<void> _exportTsv() async {
+    try {
+      final now = DateTime.now().toIso8601String().replaceAll(':', '-');
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}/bp_export_$now.tsv';
+      final file = File(path);
+
+      final buf = StringBuffer();
+      if (_mode == _ViewMode.trend) {
+        buf.writeln('mode\tstart\tend');
+        buf.writeln('trend\t${_rangeStart.toIso8601String()}\t${_rangeEnd.toIso8601String()}');
+        buf.writeln('timestamp\tsystolic_mmHg\tdiastolic_mmHg\tsource');
+        for (final e in _series) {
+          final ts = e.timestamp?.toIso8601String() ?? '';
+          buf.writeln('$ts\t${e.systolic?.toStringAsFixed(1) ?? ''}\t${e.diastolic?.toStringAsFixed(1) ?? ''}\t${e.source ?? ''}');
+        }
+      } else if (_mode == _ViewMode.averageDay) {
+        final agg = _AverageDayAggregator(series: _series).compute(stepMinutes: 15, smoothMinutes: 45);
+        buf.writeln('mode\tstart\tend');
+        buf.writeln('average_day\t${_rangeStart.toIso8601String()}\t${_rangeEnd.toIso8601String()}');
+        buf.writeln('minute_of_day\ttime_label\tsystolic_mean_mmHg\tdiastolic_mean_mmHg');
+        for (int i = 0; i < agg.minutes.length; i++) {
+          final m = agg.minutes[i];
+          final h = (m / 60).floor();
+          final min = m % 60;
+          String two(int n) => n.toString().padLeft(2, '0');
+          final label = '${two(h)}:${two(min)}';
+          final s = agg.sysMean[i]?.toStringAsFixed(1) ?? '';
+          final d = agg.diaMean[i]?.toStringAsFixed(1) ?? '';
+          buf.writeln('$m\t$label\t$s\t$d');
+        }
+      } else if (_mode == _ViewMode.compare) {
+        if (_avgA == null || _avgB == null) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pick two ranges and Fetch first.')));
+          return;
+        }
+        buf.writeln('mode');
+        buf.writeln('compare');
+        buf.writeln('rangeA_start\trangeA_end\trangeB_start\trangeB_end');
+        buf.writeln('${_rangeA?.start.toIso8601String() ?? ''}\t${_rangeA?.end.toIso8601String() ?? ''}\t${_rangeB?.start.toIso8601String() ?? ''}\t${_rangeB?.end.toIso8601String() ?? ''}');
+        buf.writeln('minute_of_day\ttime_label\tA_systolic\tA_diastolic\tB_systolic\tB_diastolic\tDelta_systolic(B-A)\tDelta_diastolic(B-A)');
+        for (int i = 0; i < _avgA!.minutes.length; i++) {
+          final m = _avgA!.minutes[i];
+          final h = (m / 60).floor();
+          final min = m % 60;
+          String two(int n) => n.toString().padLeft(2, '0');
+          final label = '${two(h)}:${two(min)}';
+          final aS = _avgA!.sysMean[i];
+          final aD = _avgA!.diaMean[i];
+          final bS = _avgB!.sysMean[i];
+          final bD = _avgB!.diaMean[i];
+          String f(double? v) => v == null ? '' : v.toStringAsFixed(1);
+          final dS = (bS != null && aS != null) ? (bS - aS).toStringAsFixed(1) : '';
+          final dD = (bD != null && aD != null) ? (bD - aD).toStringAsFixed(1) : '';
+          buf.writeln('$m\t$label\t${f(aS)}\t${f(aD)}\t${f(bS)}\t${f(bD)}\t$dS\t$dD');
+        }
+      }
+
+      await file.writeAsString(buf.toString());
+      final x = XFile(file.path, mimeType: 'text/tab-separated-values', name: file.uri.pathSegments.last);
+      await Share.shareXFiles([x], subject: 'Blood Pressure Export (TSV)', text: 'Attached TSV export from Blood Pressure app.');
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Export failed: $e')));
+    }
   }
 }
 
