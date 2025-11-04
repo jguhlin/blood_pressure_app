@@ -361,8 +361,17 @@ class _LatestBPPageState extends State<LatestBPPage> {
   double? _toDouble(dynamic value) {
     if (value == null) return null;
     if (value is num) return value.toDouble();
+    // Health package uses HealthValue; extract numericValue when present
     try {
-      // Some plugin versions wrap numeric types; fallback to parsing
+      if (value is NumericHealthValue) {
+        return (value.numericValue).toDouble();
+      }
+      final json = value.toJson();
+      final dyn = json['numericValue'] ?? json['value'];
+      if (dyn is num) return dyn.toDouble();
+      if (dyn is String) return double.tryParse(dyn);
+    } catch (_) {}
+    try {
       return double.parse(value.toString());
     } catch (_) {
       return null;
