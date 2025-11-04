@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/services.dart';
 
 void main() => runApp(const BPApp());
 
@@ -32,6 +33,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
   final Health _health = Health();
   bool _loading = false;
   String? _error;
+  bool _hasPermissions = false;
   _BPEntry? _latest;
   List<_BPEntry> _series = const [];
   int _rangeDays = 30;
@@ -128,9 +130,11 @@ class _LatestBPPageState extends State<LatestBPPage> {
         setState(() {
           _loading = false;
           _error = 'Health permission not granted';
+          _hasPermissions = false;
         });
         return;
       }
+      setState(() => _hasPermissions = true);
 
       _rangeEnd = DateTime.now();
       if (!_isCustomRange) {
@@ -391,6 +395,32 @@ class _LatestBPPageState extends State<LatestBPPage> {
           children: [
             if (_loading) const LinearProgressIndicator(),
             const SizedBox(height: 12),
+            if (!_hasPermissions)
+              Card(
+                color: Colors.amber.shade50,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Health permissions are required to read blood pressure.', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 8),
+                      Wrap(spacing: 8, runSpacing: 8, children: [
+                        ElevatedButton.icon(
+                          onPressed: _requestPermsManually,
+                          icon: const Icon(Icons.verified_user),
+                          label: const Text('Grant in app'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: _openHealthConnectSettings,
+                          icon: const Icon(Icons.settings),
+                          label: const Text('Open Health Connect'),
+                        ),
+                      ]),
+                    ],
+                  ),
+                ),
+              ),
             // Range and mode selectors
             if (_mode != _ViewMode.compare)
               Row(
@@ -707,6 +737,32 @@ class _LatestBPPageState extends State<LatestBPPage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Export failed: $e')));
+    }
+  }
+
+  Future<void> _requestPermsManually() async {
+    try {
+      final ok = await _ensurePermissions();
+      if (ok) {
+        setState(() => _hasPermissions = true);
+        _fetchData();
+      } else {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Permission still not granted. Open Health Connect.')));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Permission error: $e')));
+    }
+  }
+
+  static const _hcChannel = MethodChannel('app.healthconnect');
+  Future<void> _openHealthConnectSettings() async {
+    try {
+      await _hcChannel.invokeMethod('openSettings');
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Unable to open Health Connect: $e')));
     }
   }
 }

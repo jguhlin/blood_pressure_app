@@ -33,11 +33,19 @@
             </intent-filter>
         </activity>
 
-        <!-- Optional alias to link to a privacy policy in settings -->
+        <!-- Optional alias to link to a privacy policy in settings / permission rationale
+             For Android 13 and below (rationale) and Android 14+ (permission usage view) -->
         <activity-alias
             android:name="ViewPermissionUsageActivity"
             android:targetActivity=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
+            <!-- Android 14+ -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+            <!-- Android 13 and below -->
             <intent-filter>
                 <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
             </intent-filter>
