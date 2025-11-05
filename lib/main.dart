@@ -88,6 +88,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
   late DateTime _rangeEnd;
   late DateTime _rangeStart;
   _ViewMode _mode = _ViewMode.trend;
+  // PDF options
+  bool _pdfIncludeBothCharts = true; // default to embed both Trend + Average Day
   // Compare mode state
   DateTimeRange? _rangeA;
   DateTimeRange? _rangeB;
@@ -129,6 +131,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
     _secondMetric = prefs.getString('second_metric') ?? _secondMetric;
     _bpBodyPosition = prefs.getString('bp_body_position') ?? _bpBodyPosition;
     _bpArm = prefs.getString('bp_arm') ?? _bpArm;
+    _pdfIncludeBothCharts = prefs.getBool('pdf_include_both_charts') ?? _pdfIncludeBothCharts;
     await _loadEvents(prefs);
     if (!mounted) return;
     setState(() {
@@ -183,6 +186,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
     await prefs.setString('second_metric', _secondMetric);
     await prefs.setString('bp_body_position', _bpBodyPosition);
     await prefs.setString('bp_arm', _bpArm);
+    await prefs.setBool('pdf_include_both_charts', _pdfIncludeBothCharts);
     await _saveEvents(prefs);
   }
 
@@ -310,9 +314,14 @@ class _LatestBPPageState extends State<LatestBPPage> {
       final pts = await _health.getHealthDataFromTypes(types: [t], startTime: start, endTime: end);
       final out = <_SecSample>[];
       for (final p in pts) {
-        final v = _toDouble(p.value);
+        double? v = _toDouble(p.value);
+        // For sleep-asleep, treat as duration-based metric
+        final durMin = p.dateTo.difference(p.dateFrom).inMinutes.toDouble();
+        if (t == HealthDataType.SLEEP_ASLEEP) {
+          v ??= 1.0; // any value; we'll use duration for fraction
+        }
         if (v == null) continue;
-        out.add(_SecSample(t: p.dateTo, v: v));
+        out.add(_SecSample(t: p.dateTo, v: v, start: p.dateFrom, end: p.dateTo, durMin: durMin));
       }
       out.sort((a,b)=>a.t.compareTo(b.t));
       return out;
@@ -960,12 +969,39 @@ class _LatestBPPageState extends State<LatestBPPage> {
                 ),
               )
             else if (_series.isNotEmpty)
-              RepaintBoundary(
-                key: _mode == _ViewMode.trend ? _trendChartKey : _avgChartKey,
-                child: SizedBox(
-                  height: 260,
-                  child: _mode == _ViewMode.trend
-                      ? _TrendChart(
+              // Build both charts stacked so we can capture either/both for PDF.
+              SizedBox(
+                height: 260,
+                child: Stack(children: [
+                  // Hidden counterpart (average day)
+                  if (true)
+                    IgnorePointer(
+                      ignoring: true,
+                      child: Opacity(
+                        opacity: _mode == _ViewMode.averageDay ? 1.0 : 0.001,
+                        child: RepaintBoundary(
+                          key: _avgChartKeyCapture,
+                          child: _AverageDayChart(
+                            series: _series,
+                            anchorMinute: _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null,
+                            showBands: _showBands,
+                            showSys: _showSys,
+                            showDia: _showDia,
+                            // pass samples for HR/HRV/Steps/Sleep
+                            secondarySamples: (_secondMetric == 'resting_hr' || _secondMetric == 'hr' || _secondMetric == 'hrv_sdnn' || _secondMetric == 'hrv_rmssd' || _secondMetric == 'steps' || _secondMetric == 'sleep') ? _secSamples : const [],
+                            secondaryLabel: _secondMetric,
+                          ),
+                        ),
+                      ),
+                    ),
+                  // Hidden/visible trend chart
+                  IgnorePointer(
+                    ignoring: true,
+                    child: Opacity(
+                      opacity: _mode == _ViewMode.trend ? 1.0 : 0.001,
+                      child: RepaintBoundary(
+                        key: _trendChartKeyCapture,
+                        child: _TrendChart(
                           series: _series,
                           start: _rangeStart,
                           end: _rangeEnd,
@@ -978,17 +1014,39 @@ class _LatestBPPageState extends State<LatestBPPage> {
                           smoothingMethod: _trendSmoothMethod,
                           secondary: _secSeries,
                           secondaryLabel: _secondMetric,
-                        )
-                      : _AverageDayChart(
-                          series: _series,
-                          anchorMinute: _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null,
-                          showBands: _showBands,
-                          showSys: _showSys,
-                          showDia: _showDia,
-                          secondarySamples: (_secondMetric == 'resting_hr' || _secondMetric == 'hr' || _secondMetric == 'hrv_sdnn' || _secondMetric == 'hrv_rmssd') ? _secSamples : const [],
-                          secondaryLabel: _secondMetric,
                         ),
-                ),
+                      ),
+                    ),
+                  ),
+                  // Visible interactive chart on top (to allow pointer events)
+                  RepaintBoundary(
+                    key: _mode == _ViewMode.trend ? _trendChartKey : _avgChartKey,
+                    child: _mode == _ViewMode.trend
+                        ? _TrendChart(
+                            series: _series,
+                            start: _rangeStart,
+                            end: _rangeEnd,
+                            showSys: _showSys,
+                            showDia: _showDia,
+                            distribution: _trendDistribution,
+                            tooltipsEnabled: _trendTooltips,
+                            smoothingEnabled: _trendSmoothing,
+                            smoothingWindowDays: _trendSmoothDays,
+                            smoothingMethod: _trendSmoothMethod,
+                            secondary: _secSeries,
+                            secondaryLabel: _secondMetric,
+                          )
+                        : _AverageDayChart(
+                            series: _series,
+                            anchorMinute: _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null,
+                            showBands: _showBands,
+                            showSys: _showSys,
+                            showDia: _showDia,
+                            secondarySamples: (_secondMetric == 'resting_hr' || _secondMetric == 'hr' || _secondMetric == 'hrv_sdnn' || _secondMetric == 'hrv_rmssd' || _secondMetric == 'steps' || _secondMetric == 'sleep') ? _secSamples : const [],
+                            secondaryLabel: _secondMetric,
+                          ),
+                  ),
+                ]),
               )
             else
               const Text('No data available for selected range.'),
@@ -1148,8 +1206,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
               SizedBox(height: 12),
               Text('Secondary Axis'),
               SizedBox(height: 8),
-              Text('• Trend: Resting HR, Steps, Sleep supported (right axis).'),
-              Text('• Average Day: Resting HR supported (right axis) for now.'),
+              Text('• Trend: HR, Resting HR, HRV, Steps, Sleep supported (right axis).'),
+              Text('• Average Day: HR/Resting HR/HRV/Steps/Sleep supported (right-axis overlay).'),
             ]),
           ),
         ),
@@ -1211,6 +1269,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
                 if (ok) {
                   setState(() { _bpBodyPosition = pos; _bpArm = arm; });
                   await _savePrefs();
+                  // Save local annotation for this timestamp
+                  await _saveBpAnnotation(when, pos, arm);
                   if (mounted) Navigator.pop(context);
                   _fetchData();
                 } else {
@@ -1323,28 +1383,81 @@ class _LatestBPPageState extends State<LatestBPPage> {
 
   Future<void> _exportPdf() async {
     try {
+      // Simple preflight dialog with include-both-charts toggle
+      bool includeBoth = _pdfIncludeBothCharts;
+      if (mounted) {
+        includeBoth = await showDialog<bool>(
+              context: context,
+              builder: (ctx) {
+                bool tmp = _pdfIncludeBothCharts;
+                return StatefulBuilder(builder: (context, setSt) {
+                  return AlertDialog(
+                    title: const Text('Export PDF'),
+                    content: CheckboxListTile(
+                      value: tmp,
+                      onChanged: (v) => setSt(() => tmp = v ?? true),
+                      title: const Text('Include both charts (Trend + Average Day)'),
+                    ),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                      ElevatedButton(onPressed: () => Navigator.pop(ctx, tmp), child: const Text('Export')),
+                    ],
+                  );
+                });
+              }) ?? _pdfIncludeBothCharts;
+        _pdfIncludeBothCharts = includeBoth;
+        await _savePrefs();
+      }
+
+      await _loadAnnotations();
       final doc = pw.Document();
       final eff = _effectiveRangeLabel(_series, _rangeStart, _rangeEnd);
-      // capture chart image if possible
-      Uint8List? chartPng;
-      final ck = _chartKeyForMode();
-      if (ck != null) chartPng = await _captureChartPng(ck);
       final secSummary = _secondarySummaryText();
+
+      // capture chart image(s)
+      final List<pw.Widget> chartWidgets = [];
+      await Future.delayed(const Duration(milliseconds: 60)); // allow hidden charts to paint
+      if (_mode == _ViewMode.compare) {
+        final png = await _captureChartPng(_compareChartKey);
+        if (png != null) chartWidgets.add(pw.Center(child: pw.Image(pw.MemoryImage(png), width: 500)));
+      } else {
+        if (includeBoth) {
+          final tPng = await _captureChartPng(_trendChartKeyCapture);
+          final aPng = await _captureChartPng(_avgChartKeyCapture);
+          if (tPng != null) chartWidgets.add(pw.Center(child: pw.Image(pw.MemoryImage(tPng), width: 500)));
+          if (aPng != null) chartWidgets.add(pw.SizedBox(height: 8));
+          if (aPng != null) chartWidgets.add(pw.Center(child: pw.Image(pw.MemoryImage(aPng), width: 500)));
+        } else {
+          final ck = _chartKeyForMode();
+          if (ck != null) {
+            final png = await _captureChartPng(ck);
+            if (png != null) chartWidgets.add(pw.Center(child: pw.Image(pw.MemoryImage(png), width: 500)));
+          }
+        }
+      }
+
+      // Compute BP summary stats
+      final bpStats = _mode == _ViewMode.compare && _seriesA != null ? _bpStatsForSeries(_seriesA!) : _bpStatsForSeries(_series);
+      final hrHrvHeader = _hrHrvSummaryHeader();
+
       doc.addPage(
         pw.MultiPage(
           pageFormat: PdfPageFormat.a4,
           margin: const pw.EdgeInsets.all(24),
           build: (ctx) {
             final rows = <pw.TableRow>[];
-            rows.add(pw.TableRow(children: [pw.Text('Date'), pw.Text('Time'), pw.Text('SBP'), pw.Text('DBP'), pw.Text('Source')]));
+            rows.add(pw.TableRow(children: [pw.Text('Date'), pw.Text('Time'), pw.Text('SBP'), pw.Text('DBP'), pw.Text('Pos'), pw.Text('Arm'), pw.Text('Source')]));
             final list = [..._series]..sort((a,b)=> (b.timestamp??DateTime(0)).compareTo(a.timestamp??DateTime(0)));
             for (final e in list.take(20)) {
               final bg = _pdfBgForBp(e);
+              final ann = _annotationFor(e.timestamp);
               rows.add(pw.TableRow(children: [
                 pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(_fmtDate(e.timestamp)) ),
                 pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(_fmtTime(e.timestamp)) ),
                 pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(e.systolic?.toStringAsFixed(0) ?? '-') ),
                 pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(e.diastolic?.toStringAsFixed(0) ?? '-') ),
+                pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(ann?.$1 ?? '-')),
+                pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(ann?.$2 ?? '-')),
                 pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(e.source ?? '')), 
               ]));
             }
@@ -1352,12 +1465,30 @@ class _LatestBPPageState extends State<LatestBPPage> {
               pw.Text('Blood Pressure Report', style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
               pw.SizedBox(height: 6),
               pw.Text(eff),
+              if (hrHrvHeader != null) ...[
+                pw.SizedBox(height: 6),
+                pw.Text(hrHrvHeader, style: const pw.TextStyle(fontSize: 12, color: PdfColors.grey700)),
+              ],
               if (secSummary.isNotEmpty) pw.Text(secSummary, style: const pw.TextStyle(fontSize: 12, color: PdfColors.grey700)),
               pw.SizedBox(height: 12),
-              if (chartPng != null) pw.Center(child: pw.Image(pw.MemoryImage(chartPng), width: 500)),
+              ...chartWidgets,
               pw.SizedBox(height: 12),
-              pw.Text('Recent Readings (last 20)'),
-              pw.Table(border: pw.TableBorder.all(color: PdfColors.grey300), children: rows),
+              _bpStatsTable(bpStats),
+              if (_mode == _ViewMode.compare && _seriesA != null && _seriesB != null) ...[
+                pw.SizedBox(height: 12),
+                _compareDeltaTable(_bpStatsForSeries(_seriesA!), _bpStatsForSeries(_seriesB!)),
+              ],
+              pw.SizedBox(height: 12),
+              if (_mode != _ViewMode.compare) ...[
+                pw.Text('Recent Readings (last 20)'),
+                pw.Table(border: pw.TableBorder.all(color: PdfColors.grey300), children: rows),
+              ] else ...[
+                pw.Text('Recent Readings (A last 10)'),
+                pw.Table(border: pw.TableBorder.all(color: PdfColors.grey300), children: _rowsForSeries(_seriesA! , 10)),
+                pw.SizedBox(height: 8),
+                pw.Text('Recent Readings (B last 10)'),
+                pw.Table(border: pw.TableBorder.all(color: PdfColors.grey300), children: _rowsForSeries(_seriesB! , 10)),
+              ],
             ];
           },
         ),
@@ -1368,6 +1499,46 @@ class _LatestBPPageState extends State<LatestBPPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('PDF export failed: $e')));
     }
+  }
+
+  List<pw.TableRow> _rowsForSeries(List<_BPEntry> s, int take) {
+    final rows = <pw.TableRow>[];
+    rows.add(pw.TableRow(children: [pw.Text('Date'), pw.Text('Time'), pw.Text('SBP'), pw.Text('DBP'), pw.Text('Pos'), pw.Text('Arm'), pw.Text('Source')]));
+    final list = [...s]..sort((a,b)=> (b.timestamp??DateTime(0)).compareTo(a.timestamp??DateTime(0)));
+    for (final e in list.take(take)) {
+      final bg = _pdfBgForBp(e);
+      final ann = _annotationFor(e.timestamp);
+      rows.add(pw.TableRow(children: [
+        pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(_fmtDate(e.timestamp)) ),
+        pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(_fmtTime(e.timestamp)) ),
+        pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(e.systolic?.toStringAsFixed(0) ?? '-') ),
+        pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(e.diastolic?.toStringAsFixed(0) ?? '-') ),
+        pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(ann?.$1 ?? '-')),
+        pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(ann?.$2 ?? '-')),
+        pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(e.source ?? '')), 
+      ]));
+    }
+    return rows;
+  }
+
+  pw.Widget _compareDeltaTable(_BpStats a, _BpStats b) {
+    double? diff(double? x, double? y) => (x != null && y != null) ? (y - x) : null; // B - A
+    String f(double? v, {int d = 0, bool signed = true}) {
+      if (v == null) return '-';
+      final s = v.toStringAsFixed(d);
+      return signed && v >= 0 ? '+$s' : s;
+    }
+    return pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+      pw.Text('Compare Summaries (B - A)', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+      pw.SizedBox(height: 6),
+      pw.Table(border: pw.TableBorder.all(color: PdfColors.grey300), children: [
+        pw.TableRow(children: [pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('Metric')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('ΔSBP')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('ΔDBP'))]),
+        pw.TableRow(children: [pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('Day mean')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(diff(a.dayMeanS, b.dayMeanS))} mmHg')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(diff(a.dayMeanD, b.dayMeanD))} mmHg'))]),
+        pw.TableRow(children: [pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('Night mean')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(diff(a.nightMeanS, b.nightMeanS))} mmHg')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(diff(a.nightMeanD, b.nightMeanD))} mmHg'))]),
+        pw.TableRow(children: [pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('Dipping')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(diff(a.dipS, b.dipS), d: 1)}%')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(diff(a.dipD, b.dipD), d: 1)}%'))]),
+        pw.TableRow(children: [pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('Morning surge')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(diff(a.morningSurgeS, b.morningSurgeS))} mmHg')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(diff(a.morningSurgeD, b.morningSurgeD))} mmHg'))]),
+      ]),
+    ]);
   }
 
   Future<void> _requestPermsManually() async {
@@ -1406,6 +1577,79 @@ class _LatestBPPageState extends State<LatestBPPage> {
     return PdfColor.fromInt(0xFFE8F5E9); // green tint
   }
 
+  // ------- Local annotations (position/arm) -------
+  // We store per-reading annotations when saving via Add BP flow.
+  Future<void> _saveBpAnnotation(DateTime t, String pos, String arm) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList('bp_annotations') ?? <String>[];
+    final entry = jsonEncode({'t': t.toIso8601String(), 'pos': pos, 'arm': arm});
+    list.add(entry);
+    await prefs.setStringList('bp_annotations', list);
+  }
+
+  // (pos, arm) tuple if a locally-saved annotation matches timestamp (within 60s).
+  (String, String)? _annotationFor(DateTime? t) {
+    if (t == null) return null;
+    // For performance we could cache, but the list is tiny (< few hundred)
+    // This runs only during export (top 20 rows)
+    try {
+      // Synchronously read prefs isn't available; use async? Simplify by using sync cache:
+      // In this code path we cannot await; instead, we read once elsewhere. As a compromise,
+      // we use a cached copy stored on state during previous save, else fallback to blocking
+      // style via SharedPreferences.getInstance() then getStringList.
+      // Because this is rarely called, a simple synchronous-like read is acceptable.
+    } catch (_) {}
+    return _annotationForSync(t);
+  }
+
+  (String, String)? _annotationForSync(DateTime t) {
+    // Load map from SharedPreferences (synchronously via thenable workaround)
+    // We can't block here; but for PDF build it's fine to use `SharedPreferences.getInstance()` synchronously
+    // since pdf build runs in async outer method and we call this only after awaiting.
+    // So call getInstance synchronously by accessing then() is cumbersome; instead we cache globally.
+    // For simplicity, keep a static cache on first call in this frame using a Future.
+    // Implement a simple blocking-like method by using a Zone microtask—here we accept a small risk and return null if unavailable.
+    return _annotations.firstWhere(
+      (ann) => (ann.t.difference(t).inSeconds).abs() <= 60,
+      orElse: () => _BpAnn.empty,
+    ).toTuple();
+  }
+
+  List<_BpAnn> _annotations = const [];
+  Future<void> _loadAnnotations() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList('bp_annotations') ?? <String>[];
+    final out = <_BpAnn>[];
+    for (final s in list) {
+      try {
+        final m = jsonDecode(s) as Map<String, dynamic>;
+        out.add(_BpAnn(
+          t: DateTime.parse(m['t'] as String),
+          pos: (m['pos'] as String?) ?? '',
+          arm: (m['arm'] as String?) ?? '',
+        ));
+      } catch (_) {}
+    }
+    _annotations = out;
+  }
+
+  String _posLabel(String code) {
+    switch (code) {
+      case 'sitting': return 'Sitting';
+      case 'standing': return 'Standing';
+      case 'supine': return 'Supine';
+      default: return '-';
+    }
+  }
+  String _armLabel(String code) {
+    switch (code) {
+      case 'left_upper_arm': return 'Left UA';
+      case 'right_upper_arm': return 'Right UA';
+      case 'wrist': return 'Wrist';
+      default: return '-';
+    }
+  }
+
   String _secondarySummaryText() {
     if (_secondMetric == 'none') return '';
     if (_secondMetric == 'steps') {
@@ -1424,8 +1668,94 @@ class _LatestBPPageState extends State<LatestBPPage> {
     return '';
   }
 
-  final GlobalKey _trendChartKey = GlobalKey();
-  final GlobalKey _avgChartKey = GlobalKey();
+  // ------- Summary stats helpers -------
+  _BpStats _bpStatsForSeries(List<_BPEntry> s) {
+    bool isDay(DateTime t) => t.hour >= 6 && t.hour < 22;
+    bool isNight(DateTime t) => !isDay(t);
+    bool isMorning(DateTime t) => t.hour >= 6 && t.hour < 10;
+    bool isEarlyMorning(DateTime t) => t.hour >= 2 && t.hour < 6;
+
+    final dayS = <double>[]; final nightS = <double>[];
+    final dayD = <double>[]; final nightD = <double>[];
+    final morningS = <double>[]; final morningD = <double>[];
+    final earlyS = <double>[]; final earlyD = <double>[];
+    for (final e in s) {
+      final t = e.timestamp; if (t == null) continue;
+      if (e.systolic != null) {
+        if (isDay(t)) dayS.add(e.systolic!); else nightS.add(e.systolic!);
+        if (isMorning(t)) morningS.add(e.systolic!);
+        if (isEarlyMorning(t)) earlyS.add(e.systolic!);
+      }
+      if (e.diastolic != null) {
+        if (isDay(t)) dayD.add(e.diastolic!); else nightD.add(e.diastolic!);
+        if (isMorning(t)) morningD.add(e.diastolic!);
+        if (isEarlyMorning(t)) earlyD.add(e.diastolic!);
+      }
+    }
+    double? mean(List<double> a) => a.isEmpty ? null : (a.reduce((x,y)=>x+y)/a.length);
+    final dayMeanS = mean(dayS), nightMeanS = mean(nightS);
+    final dayMeanD = mean(dayD), nightMeanD = mean(nightD);
+    double? dip(double? day, double? night) => (day != null && night != null && day > 0) ? ((day - night) / day * 100.0) : null;
+    final dipS = dip(dayMeanS, nightMeanS);
+    final dipD = dip(dayMeanD, nightMeanD);
+    final morningSurgeS = (mean(morningS) != null && mean(earlyS) != null) ? (mean(morningS)! - mean(earlyS)!) : null;
+    final morningSurgeD = (mean(morningD) != null && mean(earlyD) != null) ? (mean(morningD)! - mean(earlyD)!) : null;
+    return _BpStats(
+      dayMeanS: dayMeanS, nightMeanS: nightMeanS,
+      dayMeanD: dayMeanD, nightMeanD: nightMeanD,
+      dipS: dipS, dipD: dipD,
+      morningSurgeS: morningSurgeS, morningSurgeD: morningSurgeD,
+    );
+  }
+
+  pw.Widget _bpStatsTable(_BpStats st) {
+    String f(double? v, {int d = 0}) => v == null ? '-' : v.toStringAsFixed(d);
+    return pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+      pw.Text('Summary (Day vs Night; dipping; morning surge)', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+      pw.SizedBox(height: 6),
+      pw.Table(border: pw.TableBorder.all(color: PdfColors.grey300), children: [
+        pw.TableRow(children: [pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('Metric')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('SBP')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('DBP'))]),
+        pw.TableRow(children: [pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('Day mean')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(st.dayMeanS)} mmHg')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(st.dayMeanD)} mmHg'))]),
+        pw.TableRow(children: [pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('Night mean')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(st.nightMeanS)} mmHg')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(st.nightMeanD)} mmHg'))]),
+        pw.TableRow(children: [pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('Dipping')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(st.dipS, d: 1)}%')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(st.dipD, d: 1)}%'))]),
+        pw.TableRow(children: [pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('Morning surge')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(st.morningSurgeS)} mmHg')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(st.morningSurgeD)} mmHg'))]),
+      ]),
+    ]);
+  }
+
+  String? _hrHrvSummaryHeader() {
+    List<double> vals = [];
+    String? label;
+    if (_secondMetric == 'hr' || _secondMetric == 'resting_hr' || _secondMetric == 'hrv_sdnn' || _secondMetric == 'hrv_rmssd') {
+      if (_mode == _ViewMode.averageDay && _secSamples.isNotEmpty) {
+        vals = _secSamples.map((e) => e.v).toList();
+      } else if (_secSeries.isNotEmpty) {
+        vals = _secSeries.map((e) => e.value).toList();
+      }
+      if (vals.isNotEmpty) {
+        label = _secondMetric == 'hr' ? 'HR' : (_secondMetric == 'resting_hr' ? 'Resting HR' : (_secondMetric == 'hrv_sdnn' ? 'HRV SDNN' : 'HRV RMSSD'));
+      }
+    }
+    if (vals.isEmpty || label == null) return null;
+    vals.sort();
+    double q(double p) {
+      final pos = (vals.length - 1) * p;
+      final i = pos.floor();
+      final frac = pos - i;
+      if (i + 1 < vals.length) return vals[i] * (1 - frac) + vals[i + 1] * frac;
+      return vals[i];
+    }
+    final mean = vals.reduce((a,b)=>a+b) / vals.length;
+    final q25 = q(0.25), q50 = q(0.50), q75 = q(0.75);
+    final iqr = q75 - q25;
+    String unit = (_secondMetric == 'hr' || _secondMetric == 'resting_hr') ? 'bpm' : 'ms';
+    return '$label: mean ${mean.toStringAsFixed(0)} $unit; median ${q50.toStringAsFixed(0)}; IQR ${iqr.toStringAsFixed(0)}';
+  }
+
+  final GlobalKey _trendChartKey = GlobalKey(); // visible trend
+  final GlobalKey _avgChartKey = GlobalKey();   // visible average-day
+  final GlobalKey _trendChartKeyCapture = GlobalKey(); // hidden capture-only
+  final GlobalKey _avgChartKeyCapture = GlobalKey();   // hidden capture-only
   final GlobalKey _compareChartKey = GlobalKey();
 
   GlobalKey? _chartKeyForMode() {
@@ -1503,7 +1833,39 @@ class _SecPoint {
 class _SecSample {
   final DateTime t;
   final double v;
-  const _SecSample({required this.t, required this.v});
+  final DateTime? start;
+  final DateTime? end;
+  final double? durMin;
+  const _SecSample({required this.t, required this.v, this.start, this.end, this.durMin});
+}
+
+class _BpAnn {
+  final DateTime t;
+  final String pos;
+  final String arm;
+  const _BpAnn({required this.t, required this.pos, required this.arm});
+  static final empty = _BpAnn(t: DateTime.fromMillisecondsSinceEpoch(0), pos: '', arm: '');
+  (String, String)? toTuple() {
+    if (pos.isEmpty && arm.isEmpty) return null;
+    return (_posLabelStatic(pos), _armLabelStatic(arm));
+  }
+
+  static String _posLabelStatic(String code) {
+    switch (code) {
+      case 'sitting': return 'Sitting';
+      case 'standing': return 'Standing';
+      case 'supine': return 'Supine';
+      default: return '-';
+    }
+  }
+  static String _armLabelStatic(String code) {
+    switch (code) {
+      case 'left_upper_arm': return 'Left UA';
+      case 'right_upper_arm': return 'Right UA';
+      case 'wrist': return 'Wrist';
+      default: return '-';
+    }
+  }
 }
 
 class _TrendChart extends StatelessWidget {
@@ -1928,31 +2290,114 @@ class _AverageDayChart extends StatelessWidget {
       ));
     }
 
-    // Secondary time-of-day aggregation (e.g., Resting HR)
+    // Secondary: derive per-15-min value depending on metric
     List<FlSpot> secSpots = [];
     double? secMin, secMax;
+    List<double?> secSeriesVals = List<double?>.filled(agg.minutes.length, null);
     if (secondarySamples.isNotEmpty) {
-      final bins = List.generate(agg.minutes.length, (_) => <double>[]);
-      for (final s in secondarySamples) {
-        var m = s.t.hour * 60 + s.t.minute + s.t.second/60.0;
-        if (anchorMinute != null) { m = (m - anchorMinute!) % 1440; if (m < 0) m += 1440; }
-        final idx = (m / 15).floor().clamp(0, agg.minutes.length - 1);
-        bins[idx].add(s.v);
+      if (secondaryLabel == 'steps') {
+        // Distribute steps across overlapping bins, then convert to steps/min per bin
+        final sums = List<double>.filled(agg.minutes.length, 0.0);
+        final mins = List<double>.filled(agg.minutes.length, 0.0);
+        for (final s in secondarySamples) {
+          final start = s.start ?? s.t.subtract(const Duration(minutes: 1));
+          final end = s.end ?? s.t;
+          double steps = s.v;
+          final totalMin = (end.difference(start).inSeconds / 60.0).clamp(0.0, 1440.0);
+          if (totalMin <= 0) {
+            // assign to closest bin
+            var m = s.t.hour * 60 + s.t.minute + s.t.second / 60.0;
+            if (anchorMinute != null) { m = (m - anchorMinute!) % 1440; if (m < 0) m += 1440; }
+            final idx = (m / 15).floor().clamp(0, agg.minutes.length - 1);
+            sums[idx] += steps;
+            mins[idx] += 15.0;
+            continue;
+          }
+          DateTime cur = start;
+          while (cur.isBefore(end)) {
+            final binStartMin = ((cur.hour * 60 + cur.minute) ~/ 15) * 15;
+            int binIdx;
+            if (anchorMinute != null) {
+              int anchored = (binStartMin - anchorMinute!) % 1440; if (anchored < 0) anchored += 1440;
+              binIdx = (anchored / 15).floor();
+            } else {
+              binIdx = (binStartMin / 15).floor();
+            }
+            binIdx = binIdx.clamp(0, agg.minutes.length - 1);
+            final binStart = DateTime(cur.year, cur.month, cur.day, binStartMin ~/ 60, binStartMin % 60);
+            final binEnd = binStart.add(const Duration(minutes: 15));
+            final segEnd = end.isBefore(binEnd) ? end : binEnd;
+            final overlap = (segEnd.difference(cur).inSeconds / 60.0).clamp(0.0, 15.0);
+            if (overlap > 0) {
+              final frac = overlap / (totalMin <= 0 ? overlap : totalMin);
+              sums[binIdx] += steps * frac;
+              mins[binIdx] += overlap;
+            }
+            cur = segEnd;
+          }
+        }
+        for (int i = 0; i < agg.minutes.length; i++) {
+          final m = mins[i];
+          if (m > 0) secSeriesVals[i] = sums[i] / m; // steps per minute
+        }
+        secMin = 0;
+        final ys = secSeriesVals.whereType<double>().toList();
+        if (ys.isNotEmpty) secMax = ys.reduce(math.max);
+      } else if (secondaryLabel == 'sleep') {
+        // Compute asleep fraction in each 15-min bin using duration overlap
+        final asleepMin = List<double>.filled(agg.minutes.length, 0.0);
+        for (final s in secondarySamples) {
+          final start = s.start ?? s.t.subtract(const Duration(minutes: 1));
+          final end = s.end ?? s.t;
+          DateTime cur = start;
+          while (cur.isBefore(end)) {
+            final binStartMin = ((cur.hour * 60 + cur.minute) ~/ 15) * 15;
+            int binIdx;
+            if (anchorMinute != null) {
+              int anchored = (binStartMin - anchorMinute!) % 1440; if (anchored < 0) anchored += 1440;
+              binIdx = (anchored / 15).floor();
+            } else {
+              binIdx = (binStartMin / 15).floor();
+            }
+            binIdx = binIdx.clamp(0, agg.minutes.length - 1);
+            final binStart = DateTime(cur.year, cur.month, cur.day, binStartMin ~/ 60, binStartMin % 60);
+            final binEnd = binStart.add(const Duration(minutes: 15));
+            final segEnd = end.isBefore(binEnd) ? end : binEnd;
+            final overlap = (segEnd.difference(cur).inSeconds / 60.0).clamp(0.0, 15.0);
+            if (overlap > 0) {
+              asleepMin[binIdx] += overlap;
+            }
+            cur = segEnd;
+          }
+        }
+        for (int i = 0; i < agg.minutes.length; i++) {
+          if (asleepMin[i] > 0) secSeriesVals[i] = (asleepMin[i] / 15.0).clamp(0.0, 1.0);
+        }
+        secMin = 0; secMax = 1;
+      } else {
+        // HR/HRV mean per bin
+        final bins = List.generate(agg.minutes.length, (_) => <double>[]);
+        for (final s in secondarySamples) {
+          var m = s.t.hour * 60 + s.t.minute + s.t.second/60.0;
+          if (anchorMinute != null) { m = (m - anchorMinute!) % 1440; if (m < 0) m += 1440; }
+          final idx = (m / 15).floor().clamp(0, agg.minutes.length - 1);
+          bins[idx].add(s.v);
+        }
+        for (int i = 0; i < bins.length; i++) {
+          final b = bins[i];
+          if (b.isNotEmpty) secSeriesVals[i] = b.reduce((a,b)=>a+b)/b.length;
+        }
+        final ys = secSeriesVals.whereType<double>().toList();
+        if (ys.isNotEmpty) { secMin = ys.reduce(math.min); secMax = ys.reduce(math.max); }
       }
-      final secMeans = <double?>[];
-      for (final b in bins) {
-        if (b.isEmpty) { secMeans.add(null); } else { secMeans.add(b.reduce((a,b)=>a+b)/b.length); }
-      }
-      // map to chart coordinates with right-axis mapping
-      final ys = <double>[];
-      for (final v in secMeans) { if (v != null) ys.add(v); }
-      if (ys.isNotEmpty) { secMin = ys.reduce(math.min); secMax = ys.reduce(math.max); }
+
+      // Map secondary to left-axis coordinates (so it shares the chart area)
       final leftMin = _autoMinY([if (showSys) sysSpots, if (showDia) diaSpots]);
       final leftMax = _autoMaxY([if (showSys) sysSpots, if (showDia) diaSpots]);
       final leftRange = (leftMax - leftMin).abs() < 1e-6 ? 1.0 : (leftMax - leftMin);
-      final secRange = (secMax != null && secMin != null && (secMax - secMin).abs() >= 1e-6) ? (secMax - secMin) : 1.0;
-      for (int i = 0; i < secMeans.length; i++) {
-        final v = secMeans[i];
+      final secRange = (secMax != null && secMin != null && (secMax - secMin!).abs() >= 1e-6) ? (secMax! - secMin!) : 1.0;
+      for (int i = 0; i < secSeriesVals.length; i++) {
+        final v = secSeriesVals[i];
         if (v == null) continue;
         final x = agg.minutes[i] / 60.0;
         final y = leftMin + (v - (secMin ?? 0)) * leftRange / secRange;
@@ -1960,12 +2405,16 @@ class _AverageDayChart extends StatelessWidget {
       }
     }
 
-    return LineChart(
+    final minY = _autoMinY([if (showSys) sysSpots, if (showDia) diaSpots, secSpots.isNotEmpty ? secSpots : <FlSpot>[]]) - 10;
+    final maxY = _autoMaxY([if (showSys) sysSpots, if (showDia) diaSpots, secSpots.isNotEmpty ? secSpots : <FlSpot>[]]) + 10;
+
+    // Build chart with optional right-axis overlay for secondary
+    final chart = LineChart(
       LineChartData(
         minX: 0,
         maxX: 24,
-        minY: _autoMinY([if (showSys) sysSpots, if (showDia) diaSpots, secSpots.isNotEmpty ? secSpots : <FlSpot>[]]) - 10,
-        maxY: _autoMaxY([if (showSys) sysSpots, if (showDia) diaSpots, secSpots.isNotEmpty ? secSpots : <FlSpot>[]]) + 10,
+        minY: minY,
+        maxY: maxY,
         gridData: const FlGridData(show: true, drawVerticalLine: true),
         titlesData: FlTitlesData(
           leftTitles: AxisTitles(
@@ -2009,6 +2458,45 @@ class _AverageDayChart extends StatelessWidget {
         rangeAnnotations: _zoneAnnotations(showSys: showSys, showDia: showDia),
       ),
     );
+
+    if (secSpots.isEmpty) return chart;
+
+    // Overlay right-axis labels (workaround fl_chart limitation)
+    String fmtTick(double v) {
+      if (secondaryLabel == 'sleep') return (v * 100).round().toString();
+      return v.round().toString();
+    }
+    final ticks = <double>[];
+    final tickVals = <String>[];
+    final leftRange = (maxY - minY).abs() < 1e-6 ? 1.0 : (maxY - minY);
+    if (secMin != null && secMax != null) {
+      for (int i = 0; i <= 4; i++) {
+        final yLeft = minY + leftRange * (i / 4);
+        final secVal = (secMin!) + (yLeft - minY) * (secMax! - secMin!) / leftRange;
+        ticks.add(yLeft);
+        tickVals.add(fmtTick(secVal));
+      }
+    }
+
+    return Stack(children: [
+      Positioned.fill(child: chart),
+      if (ticks.isNotEmpty)
+        Positioned.fill(
+          child: Padding(
+            padding: const EdgeInsets.only(right: 2, top: 4, bottom: 18),
+            child: Stack(children: [
+              for (int i = 0; i < tickVals.length; i++)
+                Align(
+                  alignment: Alignment(1, 1 - 2 * (((ticks[i] - minY) / (maxY - minY)).clamp(0.0, 1.0))),
+                  child: Text(
+                    secondaryLabel == 'sleep' ? '${tickVals[i]}%' : tickVals[i],
+                    style: const TextStyle(fontSize: 10, color: Colors.purple),
+                  ),
+                ),
+            ]),
+          ),
+        ),
+    ]);
   }
 
   double _autoMinY(List<List<FlSpot>> lists) {
@@ -2317,6 +2805,18 @@ class _AvgDay {
 }
 
 enum _ViewMode { trend, averageDay, compare }
+
+class _BpStats {
+  final double? dayMeanS;
+  final double? nightMeanS;
+  final double? dayMeanD;
+  final double? nightMeanD;
+  final double? dipS; // %
+  final double? dipD; // %
+  final double? morningSurgeS; // mmHg
+  final double? morningSurgeD; // mmHg
+  const _BpStats({this.dayMeanS, this.nightMeanS, this.dayMeanD, this.nightMeanD, this.dipS, this.dipD, this.morningSurgeS, this.morningSurgeD});
+}
 
 class _LegendDot extends StatelessWidget {
   final Color color;
