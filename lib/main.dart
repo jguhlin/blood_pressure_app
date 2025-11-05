@@ -1332,7 +1332,10 @@ class _LatestBPPageState extends State<LatestBPPage> {
       return StatefulBuilder(builder: (context, setSt){
         Future<void> pickDateTime() async {
           final d = await showDatePicker(context: context, firstDate: DateTime(2000), lastDate: DateTime.now().add(const Duration(days: 365)), initialDate: when);
-          if (d == null) return; final t = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(when));
+          if (d == null) return;
+          if (!context.mounted) return;
+          final t = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(when));
+          if (!context.mounted) return;
           setSt(()=> when = DateTime(d.year,d.month,d.day, t?.hour ?? when.hour, t?.minute ?? when.minute));
         }
         return Padding(
@@ -1370,17 +1373,17 @@ class _LatestBPPageState extends State<LatestBPPage> {
               const SizedBox(height: 16),
               Align(alignment: Alignment.centerRight, child: ElevatedButton.icon(onPressed: () async {
                 final s = int.tryParse(sysCtl.text.trim()); final d = int.tryParse(diaCtl.text.trim());
-                if (s==null || d==null) { if (!mounted) return; ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter valid numbers'))); return; }
+                if (s==null || d==null) { if (!context.mounted) return; ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter valid numbers'))); return; }
                 final ok = await _health.writeBloodPressure(systolic: s, diastolic: d, startTime: when);
                 if (ok) {
                   setState(() { _bpBodyPosition = pos; _bpArm = arm; });
                   await _savePrefs();
                   // Save local annotation for this timestamp
                   await _saveBpAnnotation(when, pos, arm);
-                  if (mounted) Navigator.pop(context);
+                  if (context.mounted) Navigator.pop(context);
                   _fetchData();
                 } else {
-                  if (!mounted) return; ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to save BP to Health Connect')));
+                  if (!context.mounted) return; ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to save BP to Health Connect')));
                 }
               }, icon: const Icon(Icons.save), label: const Text('Save to Health Connect'))),
             ]),
@@ -1450,6 +1453,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
       } else if (_mode == _ViewMode.compare) {
         if (_seriesA == null || _seriesB == null) {
           if (!mounted) return;
+          if (!context.mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pick two ranges and Fetch first.')));
           return;
         }
@@ -1480,8 +1484,10 @@ class _LatestBPPageState extends State<LatestBPPage> {
 
       await file.writeAsString(buf.toString());
       final x = XFile(file.path, mimeType: 'text/tab-separated-values', name: file.uri.pathSegments.last);
+      if (!mounted) return;
       await Share.shareXFiles([x], subject: 'Blood Pressure Export (TSV)', text: 'Attached TSV export from Blood Pressure app.');
     } catch (e) {
+      if (!mounted) return;
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Export failed: $e')));
     }
@@ -1606,8 +1612,10 @@ class _LatestBPPageState extends State<LatestBPPage> {
         ),
       );
       final bytes = await doc.save();
+      if (!mounted) return;
       await Printing.sharePdf(bytes: bytes, filename: 'bp_report.pdf');
     } catch (e) {
+      if (!mounted) return;
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('PDF export failed: $e')));
     }
@@ -1661,9 +1669,11 @@ class _LatestBPPageState extends State<LatestBPPage> {
         _fetchData();
       } else {
         if (!mounted) return;
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Permission still not granted. Open Health Connect.')));
       }
     } catch (e) {
+      if (!mounted) return;
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Permission error: $e')));
     }
@@ -1674,6 +1684,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
     try {
       await _hcChannel.invokeMethod('openSettings');
     } catch (e) {
+      if (!mounted) return;
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Unable to open Health Connect: $e')));
     }
