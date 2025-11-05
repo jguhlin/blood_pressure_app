@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
 import 'package:health/health.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'dart:math' as math;
@@ -65,6 +66,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
   bool _trendTooltips = true; // tooltips for trend (esp. distribution medians)
   bool _trendSmoothing = false; // smooth daily quantiles in distribution view
   int _trendSmoothDays = 7; // odd window length in days for smoothing
+  String _trendSmoothMethod = 'ma'; // 'ma' or 'ema'
+  bool _trendSmoothAuto = true; // tie window to range length
   _BPEntry? _latest;
   List<_BPEntry> _series = const [];
   int _listLimit = 100;
@@ -106,6 +109,11 @@ class _LatestBPPageState extends State<LatestBPPage> {
     final aEndIso = prefs.getString('rangeA_end');
     final bStartIso = prefs.getString('rangeB_start');
     final bEndIso = prefs.getString('rangeB_end');
+    _trendSmoothing = prefs.getBool('trend_smoothing') ?? _trendSmoothing;
+    _trendSmoothDays = prefs.getInt('trend_smooth_days') ?? _trendSmoothDays;
+    _trendSmoothMethod = prefs.getString('trend_smooth_method') ?? _trendSmoothMethod;
+    _trendSmoothAuto = prefs.getBool('trend_smooth_auto') ?? _trendSmoothAuto;
+    await _loadEvents(prefs);
     if (!mounted) return;
     setState(() {
       _anchorToDose = anchor;
@@ -150,6 +158,11 @@ class _LatestBPPageState extends State<LatestBPPage> {
       await prefs.setString('rangeB_start', _rangeB!.start.toIso8601String());
       await prefs.setString('rangeB_end', _rangeB!.end.toIso8601String());
     }
+    await prefs.setBool('trend_smoothing', _trendSmoothing);
+    await prefs.setInt('trend_smooth_days', _trendSmoothDays);
+    await prefs.setString('trend_smooth_method', _trendSmoothMethod);
+    await prefs.setBool('trend_smooth_auto', _trendSmoothAuto);
+    await _saveEvents(prefs);
   }
 
   Future<void> _fetchData() async {
@@ -349,6 +362,64 @@ class _LatestBPPageState extends State<LatestBPPage> {
     }
   }
 
+  // ---------- Events (bookmarks) ----------
+  List<_Event> _events = const [];
+  Future<void> _loadEvents(SharedPreferences prefs) async {
+    final json = prefs.getStringList('events_json') ?? [];
+    final list = <_Event>[];
+    for (final s in json) {
+      try {
+        final m = Map<String, dynamic>.from(jsonDecode(s) as Map);
+        list.add(_Event(
+          id: m['id'] as String,
+          title: m['title'] as String,
+          date: DateTime.parse(m['date'] as String),
+        ));
+      } catch (_) {}
+    }
+    _events = list..sort((a,b)=>b.date.compareTo(a.date));
+  }
+
+  Future<void> _saveEvents(SharedPreferences prefs) async {
+    final strs = _events.map((e) => jsonEncode({'id': e.id, 'title': e.title, 'date': e.date.toIso8601String()})).toList();
+    await prefs.setStringList('events_json', strs);
+  }
+
+  Future<void> _addEvent(String title, DateTime date) async {
+    final e = _Event(id: 'evt_${DateTime.now().microsecondsSinceEpoch}', title: title, date: DateTime(date.year, date.month, date.day));
+    setState(() => _events = [e, ..._events]..sort((a,b)=>b.date.compareTo(a.date)));
+    await _savePrefs();
+  }
+  Future<void> _renameEvent(String id, String title) async {
+    setState(() => _events = _events.map((e)=> e.id==id? e.copyWith(title: title): e).toList());
+    await _savePrefs();
+  }
+  Future<void> _deleteEvent(String id) async {
+    setState(() => _events = _events.where((e)=>e.id!=id).toList());
+    await _savePrefs();
+  }
+  Future<void> _setRangeFromEvent(_Event e) async {
+    setState(() {
+      _isCustomRange = true;
+      _rangeStart = DateTime(e.date.year, e.date.month, e.date.day);
+      _rangeEnd = _rangeStart.add(Duration(days: _rangeDays));
+    });
+    await _savePrefs();
+    await _fetchData();
+  }
+  Future<void> _setRangeAFromEvent(_Event e) async {
+    setState(() {
+      _rangeA = DateTimeRange(start: DateTime(e.date.year,e.date.month,e.date.day), end: DateTime(e.date.year,e.date.month,e.date.day).add(Duration(days: _rangeDays)));
+    });
+    await _savePrefs();
+  }
+  Future<void> _setRangeBFromEvent(_Event e) async {
+    setState(() {
+      _rangeB = DateTimeRange(start: DateTime(e.date.year,e.date.month,e.date.day), end: DateTime(e.date.year,e.date.month,e.date.day).add(Duration(days: _rangeDays)));
+    });
+    await _savePrefs();
+  }
+
   String _labelRange(String tag, DateTimeRange r) {
     String mmdd(DateTime d) => '${d.month}/${d.day}';
     return '$tag: ${mmdd(r.start)}–${mmdd(r.end)}';
@@ -456,6 +527,11 @@ class _LatestBPPageState extends State<LatestBPPage> {
             icon: const Icon(Icons.ios_share),
             onPressed: _loading ? null : _exportTsv,
             tooltip: 'Export TSV',
+          ),
+          IconButton(
+            icon: const Icon(Icons.tune),
+            onPressed: _openAdvancedSettings,
+            tooltip: 'Advanced Settings',
           ),
         ],
       ),
@@ -737,6 +813,13 @@ class _LatestBPPageState extends State<LatestBPPage> {
                 ],
               ),
             const SizedBox(height: 8),
+            if (_mode != _ViewMode.compare)
+              _EventChips(
+                events: _events.take(5).toList(),
+                onTap: _setRangeFromEvent,
+                onMore: _openAdvancedSettings,
+              ),
+            const SizedBox(height: 8),
             if (_mode == _ViewMode.compare)
               SizedBox(
                 height: 260,
@@ -753,17 +836,18 @@ class _LatestBPPageState extends State<LatestBPPage> {
               SizedBox(
                 height: 260,
                 child: _mode == _ViewMode.trend
-                     ? _TrendChart(
-                         series: _series,
-                         start: _rangeStart,
-                         end: _rangeEnd,
-                         showSys: _showSys,
-                         showDia: _showDia,
-                         distribution: _trendDistribution,
-                         tooltipsEnabled: _trendTooltips,
-                         smoothingEnabled: _trendSmoothing,
-                         smoothingWindowDays: _trendSmoothDays,
-                       )
+                      ? _TrendChart(
+                          series: _series,
+                          start: _rangeStart,
+                          end: _rangeEnd,
+                          showSys: _showSys,
+                          showDia: _showDia,
+                          distribution: _trendDistribution,
+                          tooltipsEnabled: _trendTooltips,
+                          smoothingEnabled: _trendSmoothing,
+                          smoothingWindowDays: _trendSmoothDays,
+                          smoothingMethod: _trendSmoothMethod,
+                        )
                     : _AverageDayChart(
                         series: _series,
                         anchorMinute: _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null,
@@ -813,6 +897,102 @@ class _LatestBPPageState extends State<LatestBPPage> {
         ),
       ),
     );
+  }
+
+  Future<void> _openAdvancedSettings() async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        final titleCtl = TextEditingController();
+        DateTime newEventDate = DateTime.now();
+        return StatefulBuilder(builder: (context, setSt) {
+          Future<void> pickDate() async {
+            final picked = await showDatePicker(context: context, firstDate: DateTime(2000), lastDate: DateTime.now().add(const Duration(days: 365)), initialDate: newEventDate);
+            if (picked != null) setSt(()=> newEventDate = picked);
+          }
+          return Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('Advanced Settings', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 12),
+                  const Text('Trend Smoother'),
+                  Row(children: [
+                    Expanded(child: RadioListTile<String>(title: const Text('Moving Average'), value: 'ma', groupValue: _trendSmoothMethod, onChanged: (v){ setState(()=> _trendSmoothMethod = v!); _savePrefs();})),
+                    Expanded(child: RadioListTile<String>(title: const Text('EMA'), value: 'ema', groupValue: _trendSmoothMethod, onChanged: (v){ setState(()=> _trendSmoothMethod = v!); _savePrefs();})),
+                  ]),
+                  Row(children: [
+                    const Text('Auto window'),
+                    const SizedBox(width: 6),
+                    Switch(value: _trendSmoothAuto, onChanged: (v){ setState(()=> _trendSmoothAuto = v); if(v){ _applyAutoWindow(); } _savePrefs();}),
+                    const SizedBox(width: 12),
+                    if(!_trendSmoothAuto)
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text('Window: ${_trendSmoothDays}d', style: const TextStyle(fontSize: 12)),
+                        Slider(value: _trendSmoothDays.toDouble(), min: 3, max: 15, divisions: 6, label: '${_trendSmoothDays}d', onChanged: (v){ int d = v.round(); if(d%2==0) d+=1; setState(()=> _trendSmoothDays = d); _savePrefs();}),
+                      ])),
+                  ]),
+                  const Divider(),
+                  const Text('Events (Bookmarks)'),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(child: TextField(controller: titleCtl, decoration: const InputDecoration(labelText: 'Title', border: OutlineInputBorder()))),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(onPressed: pickDate, icon: const Icon(Icons.date_range), label: Text('${newEventDate.month}/${newEventDate.day}/${newEventDate.year}')),
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(onPressed: () async { if(titleCtl.text.trim().isEmpty) return; await _addEvent(titleCtl.text.trim(), newEventDate); titleCtl.clear(); setSt((){}); }, icon: const Icon(Icons.add), label: const Text('Add')),
+                  ]),
+                  const SizedBox(height: 12),
+                  SizedBox(height: 220, child: ListView.separated(itemBuilder: (_,i){ final e = _events[i]; return ListTile(
+                    title: Text('${e.title} — ${e.date.year}-${e.date.month.toString().padLeft(2,'0')}-${e.date.day.toString().padLeft(2,'0')}'),
+                    trailing: Wrap(spacing:6, children: [
+                      OutlinedButton(onPressed: (){ _setRangeFromEvent(e); }, child: const Text('Set Range')),
+                      OutlinedButton(onPressed: (){ _setRangeAFromEvent(e); }, child: const Text('Set A')),
+                      OutlinedButton(onPressed: (){ _setRangeBFromEvent(e); }, child: const Text('Set B')),
+                      IconButton(onPressed: () async {
+                        final t = await _promptText(context, 'Rename Event', e.title);
+                        if (t!=null && t.trim().isNotEmpty) { await _renameEvent(e.id, t.trim()); setSt((){}); }
+                      }, icon: const Icon(Icons.edit)),
+                      IconButton(onPressed: (){ _deleteEvent(e.id); setSt((){}); }, icon: const Icon(Icons.delete)),
+                    ]),
+                  ); }, separatorBuilder: (_, __)=> const Divider(height:1), itemCount: _events.length)),
+                  const SizedBox(height: 12),
+                ]),
+              ),
+            ),
+          );
+        });
+      },
+    );
+  }
+
+  Future<String?> _promptText(BuildContext context, String title, String initial) async {
+    final ctl = TextEditingController(text: initial);
+    return showDialog<String>(context: context, builder: (ctx){
+      return AlertDialog(title: Text(title), content: TextField(controller: ctl), actions: [
+        TextButton(onPressed: ()=> Navigator.pop(ctx), child: const Text('Cancel')),
+        ElevatedButton(onPressed: ()=> Navigator.pop(ctx, ctl.text), child: const Text('Save')),
+      ]);
+    });
+  }
+
+  void _applyAutoWindow() {
+    final days = _rangeEnd.difference(_rangeStart).inDays.abs();
+    int w;
+    if (days <= 14) {
+      w = 3;
+    } else if (days <= 45) {
+      w = 7;
+    } else if (days <= 120) {
+      w = 14;
+    } else {
+      w = 21;
+    }
+    if (w % 2 == 0) w += 1;
+    setState(()=> _trendSmoothDays = w);
   }
 
   Future<void> _exportTsv() async {
@@ -969,6 +1149,7 @@ class _TrendChart extends StatelessWidget {
   final bool showDia;
   final bool distribution; // if true, show daily quantile bands
   final bool tooltipsEnabled;
+  final String smoothingMethod; // 'ma' or 'ema'
   final bool smoothingEnabled;
   const _TrendChart({
     required this.series,
@@ -978,6 +1159,7 @@ class _TrendChart extends StatelessWidget {
     this.showDia = true,
     this.distribution = false,
     this.tooltipsEnabled = true,
+    required this.smoothingMethod,
     this.smoothingEnabled = false,
     this.smoothingWindowDays = 7,
   });
@@ -1078,11 +1260,29 @@ class _TrendChart extends StatelessWidget {
         }
         return out;
       }
+      List<double?> smoothEMA(List<double?> a, int windowDays) {
+        final n = a.length;
+        final out = List<double?>.filled(n, null);
+        final alpha = 2 / (windowDays + 1);
+        double? prev;
+        for (int i = 0; i < n; i++) {
+          final v = a[i];
+          if (v == null) { out[i] = prev; continue; }
+          if (prev == null) { out[i] = v; prev = v; }
+          else { final nv = alpha * v + (1 - alpha) * prev; out[i] = nv; prev = nv; }
+        }
+        return out;
+      }
       if (smoothingEnabled) {
         int half = ((smoothingWindowDays.clamp(1, 31)) - 1) ~/ 2;
         if (half < 1) half = 1;
-        if (showSys) { mSys = smoothMA(mSys, half); p25Sys = smoothMA(p25Sys, half); p75SysL = smoothMA(p75SysL, half); }
-        if (showDia) { mDia = smoothMA(mDia, half); p25Dia = smoothMA(p25Dia, half); p75DiaL = smoothMA(p75DiaL, half); }
+        if (smoothingMethod == 'ema') {
+          if (showSys) { mSys = smoothEMA(mSys, smoothingWindowDays); p25Sys = smoothEMA(p25Sys, smoothingWindowDays); p75SysL = smoothEMA(p75SysL, smoothingWindowDays); }
+          if (showDia) { mDia = smoothEMA(mDia, smoothingWindowDays); p25Dia = smoothEMA(p25Dia, smoothingWindowDays); p75DiaL = smoothEMA(p75DiaL, smoothingWindowDays); }
+        } else {
+          if (showSys) { mSys = smoothMA(mSys, half); p25Sys = smoothMA(p25Sys, half); p75SysL = smoothMA(p75SysL, half); }
+          if (showDia) { mDia = smoothMA(mDia, half); p25Dia = smoothMA(p25Dia, half); p75DiaL = smoothMA(p75DiaL, half); }
+        }
       }
       for (int i = 0; i < days.length; i++) {
         final x = toX(days[i]);
@@ -1181,6 +1381,36 @@ class _TrendChart extends StatelessWidget {
     final frac = pos - i;
     if (i + 1 < sorted.length) return sorted[i] * (1 - frac) + sorted[i + 1] * frac;
     return sorted[i];
+  }
+}
+
+class _Event {
+  final String id; final String title; final DateTime date;
+  const _Event({required this.id, required this.title, required this.date});
+  _Event copyWith({String? title, DateTime? date}) => _Event(id: id, title: title ?? this.title, date: date ?? this.date);
+}
+
+class _EventChips extends StatelessWidget {
+  final List<_Event> events;
+  final Future<void> Function(_Event) onTap;
+  final Future<void> Function() onMore;
+  const _EventChips({required this.events, required this.onTap, required this.onMore});
+  @override
+  Widget build(BuildContext context) {
+    if (events.isEmpty) return const SizedBox.shrink();
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(children: [
+        for (final e in events) Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: ActionChip(
+            label: Text('${e.title} (${e.date.month}/${e.date.day})'),
+            onPressed: () => onTap(e),
+          ),
+        ),
+        ActionChip(label: const Text('More…'), onPressed: onMore),
+      ]),
+    );
   }
 }
 
