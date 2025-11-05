@@ -62,6 +62,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
   bool _showSys = true;
   bool _showDia = true;
   bool _trendDistribution = false; // false: lines/points, true: distribution band
+  bool _trendTooltips = true; // tooltips for trend (esp. distribution medians)
   _BPEntry? _latest;
   List<_BPEntry> _series = const [];
   int _listLimit = 100;
@@ -621,6 +622,15 @@ class _LatestBPPageState extends State<LatestBPPage> {
                       Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('Distribution')),
                     ],
                   ),
+                if (_mode == _ViewMode.trend && _trendDistribution)
+                  Row(children: [
+                    const Text('Tooltips'),
+                    const SizedBox(width: 6),
+                    Switch(
+                      value: _trendTooltips,
+                      onChanged: (v) => setState(() => _trendTooltips = v),
+                    ),
+                  ]),
                 Row(children: [
                   const Text('Bands'),
                   const SizedBox(width: 6),
@@ -709,14 +719,15 @@ class _LatestBPPageState extends State<LatestBPPage> {
               SizedBox(
                 height: 260,
                 child: _mode == _ViewMode.trend
-                    ? _TrendChart(
-                        series: _series,
-                        start: _rangeStart,
-                        end: _rangeEnd,
-                        showSys: _showSys,
-                        showDia: _showDia,
-                        distribution: _trendDistribution,
-                      )
+                     ? _TrendChart(
+                         series: _series,
+                         start: _rangeStart,
+                         end: _rangeEnd,
+                         showSys: _showSys,
+                         showDia: _showDia,
+                         distribution: _trendDistribution,
+                         tooltipsEnabled: _trendTooltips,
+                       )
                     : _AverageDayChart(
                         series: _series,
                         anchorMinute: _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null,
@@ -921,7 +932,8 @@ class _TrendChart extends StatelessWidget {
   final bool showSys;
   final bool showDia;
   final bool distribution; // if true, show daily quantile bands
-  const _TrendChart({required this.series, required this.start, required this.end, this.showSys = true, this.showDia = true, this.distribution = false});
+  final bool tooltipsEnabled;
+  const _TrendChart({required this.series, required this.start, required this.end, this.showSys = true, this.showDia = true, this.distribution = false, this.tooltipsEnabled = true});
 
   @override
   Widget build(BuildContext context) {
@@ -945,7 +957,7 @@ class _TrendChart extends StatelessWidget {
     }
     final maxX = effEnd.difference(effStart).inDays.toDouble().clamp(1.0, 365.0);
 
-    // Distribution mode: per-day quantiles
+    // Distribution mode: per-day quantiles (with gap filling by linear interpolation)
     List<FlSpot> q50Sys = [], q25Sys = [], q75Sys = [];
     List<FlSpot> q50Dia = [], q25Dia = [], q75Dia = [];
     if (distribution) {
@@ -955,24 +967,66 @@ class _TrendChart extends StatelessWidget {
         final day = DateTime(e.timestamp!.year, e.timestamp!.month, e.timestamp!.day);
         (byDay[day] ??= []).add(e);
       }
-      final days = byDay.keys.toList()..sort();
-      for (final d in days) {
-        final xs = toX(d);
-        if (showSys) {
-          final vals = byDay[d]!.where((e) => e.systolic != null).map((e) => e.systolic!).toList()..sort();
-          if (vals.isNotEmpty) {
-            q50Sys.add(FlSpot(xs, _q(vals, 0.5)));
-            q25Sys.add(FlSpot(xs, _q(vals, 0.25)));
-            q75Sys.add(FlSpot(xs, _q(vals, 0.75)));
+      // Build continuous day list from effStart..effEnd
+      final days = <DateTime>[];
+      DateTime cur = DateTime(effStart.year, effStart.month, effStart.day);
+      final last = DateTime(effEnd.year, effEnd.month, effEnd.day);
+      while (!cur.isAfter(last)) {
+        days.add(cur);
+        cur = cur.add(const Duration(days: 1));
+      }
+      List<double?> mSys = List.filled(days.length, null), p25Sys = List.filled(days.length, null), p75SysL = List.filled(days.length, null);
+      List<double?> mDia = List.filled(days.length, null), p25Dia = List.filled(days.length, null), p75DiaL = List.filled(days.length, null);
+      for (int i = 0; i < days.length; i++) {
+        final d = days[i];
+        final list = byDay[d];
+        if (list != null && showSys) {
+          final vals = list.where((e) => e.systolic != null).map((e) => e.systolic!).toList()..sort();
+          if (vals.isNotEmpty) { mSys[i] = _q(vals,0.5); p25Sys[i] = _q(vals,0.25); p75SysL[i] = _q(vals,0.75); }
+        }
+        if (list != null && showDia) {
+          final vals = list.where((e) => e.diastolic != null).map((e) => e.diastolic!).toList()..sort();
+          if (vals.isNotEmpty) { mDia[i] = _q(vals,0.5); p25Dia[i] = _q(vals,0.25); p75DiaL[i] = _q(vals,0.75); }
+        }
+      }
+      // Linear interpolate gaps
+      void interp(List<double?> a) {
+        int n = a.length;
+        int i = 0;
+        while (i < n) {
+          if (a[i] != null) { i++; continue; }
+          int j = i;
+        while (j < n && a[j] == null) {
+          j++;
+        }
+          double? left = i > 0 ? a[i - 1] : null;
+          double? right = j < n ? a[j] : null;
+          for (int k = i; k < j; k++) {
+            if (left != null && right != null) {
+              double t = (k - (i - 1)) / (j - (i - 1));
+              a[k] = left * (1 - t) + right * t;
+            } else if (left != null) {
+              a[k] = left;
+            } else if (right != null) {
+              a[k] = right;
+            }
           }
+          i = j;
+        }
+      }
+      if (showSys) { interp(mSys); interp(p25Sys); interp(p75SysL); }
+      if (showDia) { interp(mDia); interp(p25Dia); interp(p75DiaL); }
+      for (int i = 0; i < days.length; i++) {
+        final x = toX(days[i]);
+        if (showSys) {
+          if (p25Sys[i] != null) q25Sys.add(FlSpot(x, p25Sys[i]!));
+          if (p75SysL[i] != null) q75Sys.add(FlSpot(x, p75SysL[i]!));
+          if (mSys[i] != null) q50Sys.add(FlSpot(x, mSys[i]!));
         }
         if (showDia) {
-          final vals = byDay[d]!.where((e) => e.diastolic != null).map((e) => e.diastolic!).toList()..sort();
-          if (vals.isNotEmpty) {
-            q50Dia.add(FlSpot(xs, _q(vals, 0.5)));
-            q25Dia.add(FlSpot(xs, _q(vals, 0.25)));
-            q75Dia.add(FlSpot(xs, _q(vals, 0.75)));
-          }
+          if (p25Dia[i] != null) q25Dia.add(FlSpot(x, p25Dia[i]!));
+          if (p75DiaL[i] != null) q75Dia.add(FlSpot(x, p75DiaL[i]!));
+          if (mDia[i] != null) q50Dia.add(FlSpot(x, mDia[i]!));
         }
       }
     }
@@ -996,14 +1050,14 @@ class _TrendChart extends StatelessWidget {
         bars.add(LineChartBarData(spots: q25Sys, isCurved: true, color: Colors.transparent, barWidth: 0, dotData: const FlDotData(show: false)));
         bars.add(LineChartBarData(spots: q75Sys, isCurved: true, color: Colors.transparent, barWidth: 0, dotData: const FlDotData(show: false)));
         between.add(BetweenBarsData(fromIndex: base, toIndex: base + 1, color: const Color(0x26F44336)));
-        bars.add(LineChartBarData(spots: q50Sys, isCurved: true, color: Colors.red, barWidth: 2, dotData: const FlDotData(show: false)));
+        bars.add(LineChartBarData(spots: q50Sys, isCurved: true, color: Colors.red, barWidth: 2, dotData: FlDotData(show: tooltipsEnabled)));
       }
       if (showDia) {
         final base = bars.length;
         bars.add(LineChartBarData(spots: q25Dia, isCurved: true, color: Colors.transparent, barWidth: 0, dotData: const FlDotData(show: false)));
         bars.add(LineChartBarData(spots: q75Dia, isCurved: true, color: Colors.transparent, barWidth: 0, dotData: const FlDotData(show: false)));
         between.add(BetweenBarsData(fromIndex: base, toIndex: base + 1, color: const Color(0x1F2196F3)));
-        bars.add(LineChartBarData(spots: q50Dia, isCurved: true, color: Colors.blue, barWidth: 2, dotData: const FlDotData(show: false)));
+        bars.add(LineChartBarData(spots: q50Dia, isCurved: true, color: Colors.blue, barWidth: 2, dotData: FlDotData(show: tooltipsEnabled)));
       }
     }
 
@@ -1037,7 +1091,7 @@ class _TrendChart extends StatelessWidget {
         ),
         lineBarsData: bars,
         betweenBarsData: between,
-        lineTouchData: const LineTouchData(enabled: true),
+        lineTouchData: LineTouchData(enabled: tooltipsEnabled),
         borderData: FlBorderData(
           show: true,
           border: const Border(
