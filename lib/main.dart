@@ -63,6 +63,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
   bool _showDia = true;
   bool _trendDistribution = false; // false: lines/points, true: distribution band
   bool _trendTooltips = true; // tooltips for trend (esp. distribution medians)
+  bool _trendSmoothing = false; // smooth daily quantiles in distribution view
   _BPEntry? _latest;
   List<_BPEntry> _series = const [];
   int _listLimit = 100;
@@ -630,6 +631,13 @@ class _LatestBPPageState extends State<LatestBPPage> {
                       value: _trendTooltips,
                       onChanged: (v) => setState(() => _trendTooltips = v),
                     ),
+                    const SizedBox(width: 12),
+                    const Text('Smoothing'),
+                    const SizedBox(width: 6),
+                    Switch(
+                      value: _trendSmoothing,
+                      onChanged: (v) => setState(() => _trendSmoothing = v),
+                    ),
                   ]),
                 Row(children: [
                   const Text('Bands'),
@@ -727,6 +735,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
                          showDia: _showDia,
                          distribution: _trendDistribution,
                          tooltipsEnabled: _trendTooltips,
+                         smoothingEnabled: _trendSmoothing,
                        )
                     : _AverageDayChart(
                         series: _series,
@@ -933,7 +942,17 @@ class _TrendChart extends StatelessWidget {
   final bool showDia;
   final bool distribution; // if true, show daily quantile bands
   final bool tooltipsEnabled;
-  const _TrendChart({required this.series, required this.start, required this.end, this.showSys = true, this.showDia = true, this.distribution = false, this.tooltipsEnabled = true});
+  final bool smoothingEnabled;
+  const _TrendChart({
+    required this.series,
+    required this.start,
+    required this.end,
+    this.showSys = true,
+    this.showDia = true,
+    this.distribution = false,
+    this.tooltipsEnabled = true,
+    this.smoothingEnabled = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1016,6 +1035,24 @@ class _TrendChart extends StatelessWidget {
       }
       if (showSys) { interp(mSys); interp(p25Sys); interp(p75SysL); }
       if (showDia) { interp(mDia); interp(p25Dia); interp(p75DiaL); }
+
+      // Optional smoothing (moving average with half-window=2 -> 5-day window)
+      List<double?> smoothMA(List<double?> a, int halfWin) {
+        final n = a.length;
+        final out = List<double?>.filled(n, null);
+        for (int i = 0; i < n; i++) {
+          int s = (i - halfWin).clamp(0, n - 1);
+          int e = (i + halfWin).clamp(0, n - 1);
+          double sum = 0; int c = 0;
+          for (int k = s; k <= e; k++) { final v = a[k]; if (v != null) { sum += v; c++; } }
+          out[i] = c > 0 ? sum / c : a[i];
+        }
+        return out;
+      }
+      if (smoothingEnabled) {
+        if (showSys) { mSys = smoothMA(mSys, 2); p25Sys = smoothMA(p25Sys, 2); p75SysL = smoothMA(p75SysL, 2); }
+        if (showDia) { mDia = smoothMA(mDia, 2); p25Dia = smoothMA(p25Dia, 2); p75DiaL = smoothMA(p75DiaL, 2); }
+      }
       for (int i = 0; i < days.length; i++) {
         final x = toX(days[i]);
         if (showSys) {
