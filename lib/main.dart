@@ -64,6 +64,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
   bool _trendDistribution = false; // false: lines/points, true: distribution band
   bool _trendTooltips = true; // tooltips for trend (esp. distribution medians)
   bool _trendSmoothing = false; // smooth daily quantiles in distribution view
+  int _trendSmoothDays = 7; // odd window length in days for smoothing
   _BPEntry? _latest;
   List<_BPEntry> _series = const [];
   int _listLimit = 100;
@@ -638,6 +639,31 @@ class _LatestBPPageState extends State<LatestBPPage> {
                       value: _trendSmoothing,
                       onChanged: (v) => setState(() => _trendSmoothing = v),
                     ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      width: 180,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Window: ${_trendSmoothDays}d', style: const TextStyle(fontSize: 12)),
+                          Slider(
+                            value: _trendSmoothDays.toDouble(),
+                            min: 3,
+                            max: 15,
+                            divisions: 6,
+                            label: '${_trendSmoothDays}d',
+                            onChanged: _trendSmoothing
+                                ? (v) {
+                                    int d = v.round();
+                                    if (d % 2 == 0) d += 1; // force odd
+                                    if (d < 3) d = 3; if (d > 15) d = 15;
+                                    setState(() => _trendSmoothDays = d);
+                                  }
+                                : null,
+                          ),
+                        ],
+                      ),
+                    ),
                   ]),
                 Row(children: [
                   const Text('Bands'),
@@ -736,6 +762,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
                          distribution: _trendDistribution,
                          tooltipsEnabled: _trendTooltips,
                          smoothingEnabled: _trendSmoothing,
+                         smoothingWindowDays: _trendSmoothDays,
                        )
                     : _AverageDayChart(
                         series: _series,
@@ -952,7 +979,9 @@ class _TrendChart extends StatelessWidget {
     this.distribution = false,
     this.tooltipsEnabled = true,
     this.smoothingEnabled = false,
+    this.smoothingWindowDays = 7,
   });
+  final int smoothingWindowDays;
 
   @override
   Widget build(BuildContext context) {
@@ -1050,8 +1079,10 @@ class _TrendChart extends StatelessWidget {
         return out;
       }
       if (smoothingEnabled) {
-        if (showSys) { mSys = smoothMA(mSys, 2); p25Sys = smoothMA(p25Sys, 2); p75SysL = smoothMA(p75SysL, 2); }
-        if (showDia) { mDia = smoothMA(mDia, 2); p25Dia = smoothMA(p25Dia, 2); p75DiaL = smoothMA(p75DiaL, 2); }
+        int half = ((smoothingWindowDays.clamp(1, 31)) - 1) ~/ 2;
+        if (half < 1) half = 1;
+        if (showSys) { mSys = smoothMA(mSys, half); p25Sys = smoothMA(p25Sys, half); p75SysL = smoothMA(p75SysL, half); }
+        if (showDia) { mDia = smoothMA(mDia, half); p25Dia = smoothMA(p25Dia, half); p75DiaL = smoothMA(p75DiaL, half); }
       }
       for (int i = 0; i < days.length; i++) {
         final x = toX(days[i]);
