@@ -8,6 +8,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
+import 'package:printing/printing.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 
 void main() => runApp(const BPApp());
 
@@ -68,8 +71,10 @@ class _LatestBPPageState extends State<LatestBPPage> {
   int _trendSmoothDays = 7; // odd window length in days for smoothing
   String _trendSmoothMethod = 'ma'; // 'ma' or 'ema'
   bool _trendSmoothAuto = true; // tie window to range length
+  String _secondMetric = 'none'; // 'none','resting_hr','steps','sleep'
   _BPEntry? _latest;
   List<_BPEntry> _series = const [];
+  List<_SecPoint> _secSeries = const [];
   int _listLimit = 100;
   bool _listLoadingMore = false;
   int _rangeDays = 30;
@@ -114,6 +119,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
     _trendSmoothMethod = prefs.getString('trend_smooth_method') ?? _trendSmoothMethod;
     _trendSmoothAuto = prefs.getBool('trend_smooth_auto') ?? _trendSmoothAuto;
     _trendTooltips = prefs.getBool('trend_tooltips') ?? _trendTooltips;
+    _trendDistribution = prefs.getBool('trend_distribution') ?? _trendDistribution;
+    _secondMetric = prefs.getString('second_metric') ?? _secondMetric;
     await _loadEvents(prefs);
     if (!mounted) return;
     setState(() {
@@ -164,6 +171,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
     await prefs.setString('trend_smooth_method', _trendSmoothMethod);
     await prefs.setBool('trend_smooth_auto', _trendSmoothAuto);
     await prefs.setBool('trend_tooltips', _trendTooltips);
+    await prefs.setBool('trend_distribution', _trendDistribution);
+    await prefs.setString('second_metric', _secondMetric);
     await _saveEvents(prefs);
   }
 
@@ -220,10 +229,16 @@ class _LatestBPPageState extends State<LatestBPPage> {
       }
 
       final series = _combineSeries(points);
+      // Secondary metric
+      List<_SecPoint> sec = const [];
+      if (_secondMetric != 'none') {
+        sec = await _fetchSecondary(_rangeStart, _rangeEnd);
+      }
       final latest = series.isNotEmpty ? series.last : null;
       setState(() {
         _latest = latest;
         _series = series;
+        _secSeries = sec;
         _loading = false;
       });
     } catch (e) {
@@ -231,6 +246,36 @@ class _LatestBPPageState extends State<LatestBPPage> {
         _error = e.toString();
         _loading = false;
       });
+    }
+  }
+
+  Future<List<_SecPoint>> _fetchSecondary(DateTime start, DateTime end) async {
+    HealthDataType? t;
+    switch (_secondMetric) {
+      case 'resting_hr': t = HealthDataType.RESTING_HEART_RATE; break;
+      case 'steps': t = HealthDataType.STEPS; break;
+      case 'sleep': t = HealthDataType.SLEEP_ASLEEP; break;
+      default: return const [];
+    }
+    try {
+      final pts = await _health.getHealthDataFromTypes(types: [t], startTime: start, endTime: end);
+      final byDay = <DateTime, List<double>>{};
+      for (final p in pts) {
+        final day = DateTime(p.dateTo.year, p.dateTo.month, p.dateTo.day);
+        final v = _toDouble(p.value);
+        if (v == null) continue;
+        (byDay[day] ??= []).add(v);
+      }
+      final out = <_SecPoint>[];
+      for (final e in byDay.entries) {
+        final vals = e.value;
+        final agg = (_secondMetric == 'steps' || _secondMetric == 'sleep') ? vals.fold(0.0, (a,b)=>a+b) : (vals.reduce((a,b)=>a+b)/vals.length);
+        out.add(_SecPoint(date: e.key, value: agg));
+      }
+      out.sort((a,b)=>a.date.compareTo(b.date));
+      return out;
+    } catch (_) {
+      return const [];
     }
   }
 
@@ -531,6 +576,11 @@ class _LatestBPPageState extends State<LatestBPPage> {
             tooltip: 'Export TSV',
           ),
           IconButton(
+            icon: const Icon(Icons.picture_as_pdf),
+            onPressed: _loading ? null : _exportPdf,
+            tooltip: 'Export PDF',
+          ),
+          IconButton(
             icon: const Icon(Icons.tune),
             onPressed: _openAdvancedSettings,
             tooltip: 'Advanced Settings',
@@ -672,7 +722,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
                   spacing: 12,
                   runSpacing: 8,
                   crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
+              children: [
                 const Text('View:'),
                 ToggleButtons(
                   isSelected: [
@@ -696,28 +746,44 @@ class _LatestBPPageState extends State<LatestBPPage> {
                 if (_mode == _ViewMode.trend)
                   ToggleButtons(
                     isSelected: [!_trendDistribution, _trendDistribution],
-                    onPressed: (i) => setState(() => _trendDistribution = (i == 1)),
+                    onPressed: (i) { setState(() => _trendDistribution = (i == 1)); _savePrefs(); },
                     children: const [
                       Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('Lines')),
                       Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('Distribution')),
                     ],
                   ),
                 IconButton(icon: const Icon(Icons.info_outline), tooltip: 'Chart help', onPressed: _showHelp),
+                // Secondary axis selector (Trend only)
+                if (_mode == _ViewMode.trend)
+                  Row(children: [
+                    const SizedBox(width: 12),
+                    const Text('Secondary'),
+                    const SizedBox(width: 6),
+                    DropdownButton<String>(
+                      value: _secondMetric,
+                      items: const [
+                        DropdownMenuItem(value: 'none', child: Text('None')),
+                        DropdownMenuItem(value: 'resting_hr', child: Text('Resting HR')),
+                        DropdownMenuItem(value: 'steps', child: Text('Steps')),
+                        DropdownMenuItem(value: 'sleep', child: Text('Sleep (min)')),
+                      ],
+                      onChanged: (v) async {
+                        if (v == null) return;
+                        setState(()=> _secondMetric = v);
+                        await _savePrefs();
+                        await _fetchData();
+                      },
+                    ),
+                  ]),
                 if (_mode == _ViewMode.trend && _trendDistribution)
                   Row(children: [
                     const Text('Tooltips'),
                     const SizedBox(width: 6),
-                    Switch(
-                      value: _trendTooltips,
-                      onChanged: (v) => setState(() => _trendTooltips = v),
-                    ),
+                    Switch(value: _trendTooltips, onChanged: (v){ setState(()=> _trendTooltips = v); _savePrefs(); }),
                     const SizedBox(width: 12),
                     const Text('Smoothing'),
                     const SizedBox(width: 6),
-                    Switch(
-                      value: _trendSmoothing,
-                      onChanged: (v) => setState(() => _trendSmoothing = v),
-                    ),
+                    Switch(value: _trendSmoothing, onChanged: (v){ setState(()=> _trendSmoothing = v); _savePrefs(); }),
                     const SizedBox(width: 8),
                     SizedBox(
                       width: 180,
@@ -731,14 +797,13 @@ class _LatestBPPageState extends State<LatestBPPage> {
                             max: 15,
                             divisions: 6,
                             label: '${_trendSmoothDays}d',
-                            onChanged: _trendSmoothing
-                                ? (v) {
-                                    int d = v.round();
-                                    if (d % 2 == 0) d += 1; // force odd
-                                    if (d < 3) d = 3; if (d > 15) d = 15;
-                                    setState(() => _trendSmoothDays = d);
-                                  }
-                                : null,
+                            onChanged: _trendSmoothing ? (v) {
+                              int d = v.round();
+                              if (d % 2 == 0) d += 1; // force odd
+                              if (d < 3) d = 3; if (d > 15) d = 15;
+                              setState(() => _trendSmoothDays = d);
+                              _savePrefs();
+                            } : null,
                           ),
                         ],
                       ),
@@ -847,18 +912,20 @@ class _LatestBPPageState extends State<LatestBPPage> {
               SizedBox(
                 height: 260,
                 child: _mode == _ViewMode.trend
-                      ? _TrendChart(
-                          series: _series,
-                          start: _rangeStart,
-                          end: _rangeEnd,
-                          showSys: _showSys,
-                          showDia: _showDia,
-                          distribution: _trendDistribution,
-                          tooltipsEnabled: _trendTooltips,
-                          smoothingEnabled: _trendSmoothing,
-                          smoothingWindowDays: _trendSmoothDays,
-                          smoothingMethod: _trendSmoothMethod,
-                        )
+                    ? _TrendChart(
+                        series: _series,
+                        start: _rangeStart,
+                        end: _rangeEnd,
+                        showSys: _showSys,
+                        showDia: _showDia,
+                        distribution: _trendDistribution,
+                        tooltipsEnabled: _trendTooltips,
+                        smoothingEnabled: _trendSmoothing,
+                        smoothingWindowDays: _trendSmoothDays,
+                        smoothingMethod: _trendSmoothMethod,
+                        secondary: _secSeries,
+                        secondaryLabel: _secondMetric,
+                      )
                     : _AverageDayChart(
                         series: _series,
                         anchorMinute: _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null,
@@ -978,6 +1045,19 @@ class _LatestBPPageState extends State<LatestBPPage> {
         });
       },
     );
+  }
+
+  String _fmtDate(DateTime? t) {
+    if (t == null) return '-';
+    final d = t.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${d.year}-${two(d.month)}-${two(d.day)}';
+  }
+  String _fmtTime(DateTime? t) {
+    if (t == null) return '-';
+    final d = t.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(d.hour)}:${two(d.minute)}';
   }
 
   void _showHelp() {
@@ -1108,6 +1188,46 @@ class _LatestBPPageState extends State<LatestBPPage> {
     }
   }
 
+  Future<void> _exportPdf() async {
+    try {
+      final doc = pw.Document();
+      final eff = _effectiveRangeLabel(_series, _rangeStart, _rangeEnd);
+      doc.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(24),
+          build: (ctx) {
+            final rows = <pw.TableRow>[];
+            rows.add(pw.TableRow(children: [pw.Text('Date'), pw.Text('Time'), pw.Text('SBP'), pw.Text('DBP'), pw.Text('Source')]));
+            final list = [..._series]..sort((a,b)=> (b.timestamp??DateTime(0)).compareTo(a.timestamp??DateTime(0)));
+            for (final e in list.take(50)) {
+              rows.add(pw.TableRow(children: [
+                pw.Text(_fmtDate(e.timestamp)),
+                pw.Text(_fmtTime(e.timestamp)),
+                pw.Text(e.systolic?.toStringAsFixed(0) ?? '-'),
+                pw.Text(e.diastolic?.toStringAsFixed(0) ?? '-'),
+                pw.Text(e.source ?? ''),
+              ]));
+            }
+            return [
+              pw.Text('Blood Pressure Report', style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
+              pw.SizedBox(height: 6),
+              pw.Text(eff),
+              pw.SizedBox(height: 12),
+              pw.Text('Recent Readings (up to 50)'),
+              pw.Table(border: pw.TableBorder.all(color: PdfColors.grey300), children: rows),
+            ];
+          },
+        ),
+      );
+      final bytes = await doc.save();
+      await Printing.sharePdf(bytes: bytes, filename: 'bp_report.pdf');
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('PDF export failed: $e')));
+    }
+  }
+
   Future<void> _requestPermsManually() async {
     try {
       final ok = await _ensurePermissions();
@@ -1183,6 +1303,12 @@ class _BPEntry {
   const _BPEntry({this.timestamp, this.systolic, this.diastolic, this.source});
 }
 
+class _SecPoint {
+  final DateTime date;
+  final double value;
+  const _SecPoint({required this.date, required this.value});
+}
+
 class _TrendChart extends StatelessWidget {
   final List<_BPEntry> series;
   final DateTime start;
@@ -1204,8 +1330,12 @@ class _TrendChart extends StatelessWidget {
     required this.smoothingMethod,
     this.smoothingEnabled = false,
     this.smoothingWindowDays = 7,
+    this.secondary = const [],
+    this.secondaryLabel = '',
   });
   final int smoothingWindowDays;
+  final List<_SecPoint> secondary;
+  final String secondaryLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -1304,14 +1434,35 @@ class _TrendChart extends StatelessWidget {
       }
       List<double?> smoothEMA(List<double?> a, int windowDays) {
         final n = a.length;
-        final out = List<double?>.filled(n, null);
         final alpha = 2 / (windowDays + 1);
+        // forward pass
+        final f = List<double?>.filled(n, null);
         double? prev;
         for (int i = 0; i < n; i++) {
           final v = a[i];
-          if (v == null) { out[i] = prev; continue; }
-          if (prev == null) { out[i] = v; prev = v; }
-          else { final nv = alpha * v + (1 - alpha) * prev; out[i] = nv; prev = nv; }
+          if (v == null) { f[i] = prev; continue; }
+          prev = (prev == null) ? v : (alpha * v + (1 - alpha) * prev);
+          f[i] = prev;
+        }
+        // backward pass
+        final b = List<double?>.filled(n, null);
+        prev = null;
+        for (int i = n - 1; i >= 0; i--) {
+          final v = a[i];
+          if (v == null) { b[i] = prev; continue; }
+          prev = (prev == null) ? v : (alpha * v + (1 - alpha) * prev);
+          b[i] = prev;
+        }
+        // average for zero-phase
+        final out = List<double?>.filled(n, null);
+        for (int i = 0; i < n; i++) {
+          final x = f[i];
+          final y = b[i];
+          if (x != null && y != null) {
+            out[i] = (x + y) / 2;
+          } else {
+            out[i] = x ?? y ?? a[i];
+          }
         }
         return out;
       }
@@ -1319,8 +1470,16 @@ class _TrendChart extends StatelessWidget {
         int half = ((smoothingWindowDays.clamp(1, 31)) - 1) ~/ 2;
         if (half < 1) half = 1;
         if (smoothingMethod == 'ema') {
-          if (showSys) { mSys = smoothEMA(mSys, smoothingWindowDays); p25Sys = smoothEMA(p25Sys, smoothingWindowDays); p75SysL = smoothEMA(p75SysL, smoothingWindowDays); }
-          if (showDia) { mDia = smoothEMA(mDia, smoothingWindowDays); p25Dia = smoothEMA(p25Dia, smoothingWindowDays); p75DiaL = smoothEMA(p75DiaL, smoothingWindowDays); }
+          if (showSys) {
+            mSys = smoothEMA(mSys, smoothingWindowDays);
+            p25Sys = smoothEMA(p25Sys, smoothingWindowDays);
+            p75SysL = smoothEMA(p75SysL, smoothingWindowDays);
+          }
+          if (showDia) {
+            mDia = smoothEMA(mDia, smoothingWindowDays);
+            p25Dia = smoothEMA(p25Dia, smoothingWindowDays);
+            p75DiaL = smoothEMA(p75DiaL, smoothingWindowDays);
+          }
         } else {
           if (showSys) { mSys = smoothMA(mSys, half); p25Sys = smoothMA(p25Sys, half); p75SysL = smoothMA(p75SysL, half); }
           if (showDia) { mDia = smoothMA(mDia, half); p25Dia = smoothMA(p25Dia, half); p75DiaL = smoothMA(p75DiaL, half); }
@@ -1371,6 +1530,24 @@ class _TrendChart extends StatelessWidget {
       }
     }
 
+    // Secondary axis mapping if provided
+    double? secMin, secMax;
+    List<FlSpot> secSpots = [];
+    if (secondary.isNotEmpty) {
+      secMin = secondary.map((e)=>e.value).reduce(math.min);
+      secMax = secondary.map((e)=>e.value).reduce(math.max);
+      final leftRange = maxY - minY;
+      final secRange = (secMax - secMin).abs() < 1e-6 ? 1.0 : (secMax - secMin);
+      for (final s in secondary) {
+        final x = toX(s.date);
+        final y = minY + (s.value - secMin) * leftRange / secRange;
+        secSpots.add(FlSpot(x, y));
+      }
+      if (secSpots.isNotEmpty) {
+        bars.add(LineChartBarData(spots: secSpots, isCurved: true, color: Colors.purple, barWidth: 2, dotData: const FlDotData(show: false)));
+      }
+    }
+
     return LineChart(
       LineChartData(
         minX: 0,
@@ -1397,7 +1574,22 @@ class _TrendChart extends StatelessWidget {
             axisNameSize: 16,
           ),
           topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles: AxisTitles(
+            sideTitles: secondary.isEmpty
+                ? const SideTitles(showTitles: false)
+                : SideTitles(
+                    showTitles: true,
+                    reservedSize: 40,
+                    interval: (secMax != null && secMin != null) ? ((secMax - secMin) / 4).clamp(1, 1000) : 1,
+                    getTitlesWidget: (value, meta) {
+                      if (secMin == null || secMax == null) return const SizedBox.shrink();
+                      final leftRange = maxY - minY;
+                      final secRange = (secMax - secMin).abs() < 1e-6 ? 1.0 : (secMax - secMin);
+                      final secVal = secMin + (value - minY) * secRange / leftRange;
+                      return SideTitleWidget(meta: meta, child: Text(secVal.toStringAsFixed(0)));
+                    },
+                  ),
+          ),
         ),
         lineBarsData: bars,
         betweenBarsData: between,
