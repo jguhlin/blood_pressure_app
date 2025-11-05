@@ -13,6 +13,7 @@ import 'package:printing/printing.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:flutter/rendering.dart';
+import 'services/metrics.dart' as met;
 
 void main() => runApp(const BPApp());
 
@@ -74,6 +75,14 @@ class _LatestBPPageState extends State<LatestBPPage> {
   String _trendSmoothMethod = 'ma'; // 'ma' or 'ema'
   bool _trendSmoothAuto = true; // tie window to range length
   String _secondMetric = 'none'; // 'none','hr','resting_hr','hrv_sdnn','hrv_rmssd','steps','sleep','energy','workouts'
+  // Surge heuristic settings (flexible)
+  int _surgeMorningWindowHours = 2;     // [wake, wake+X]
+  int _surgeTroughWindowHours = 6;      // [wake-X, wake)
+  int _surgePrewakeHours = 2;           // [wake-X, wake)
+  int _surgeHrRiseBpm = 10;             // HR baseline+X bpm
+  int _surgeSteps30Min = 100;           // steps in 30 min threshold
+  int _surgeWakeEarliestHour = 3;       // earliest wake search hour
+  int _surgeWakeLatestHour = 11;        // latest wake search hour
   // Add-reading defaults
   String _bpBodyPosition = 'sitting'; // sitting, standing, supine
   String _bpArm = 'left_upper_arm'; // left_upper_arm, right_upper_arm, wrist
@@ -132,6 +141,13 @@ class _LatestBPPageState extends State<LatestBPPage> {
     _bpBodyPosition = prefs.getString('bp_body_position') ?? _bpBodyPosition;
     _bpArm = prefs.getString('bp_arm') ?? _bpArm;
     _pdfIncludeBothCharts = prefs.getBool('pdf_include_both_charts') ?? _pdfIncludeBothCharts;
+    _surgeMorningWindowHours = prefs.getInt('surge_morning_window_h') ?? _surgeMorningWindowHours;
+    _surgeTroughWindowHours = prefs.getInt('surge_trough_window_h') ?? _surgeTroughWindowHours;
+    _surgePrewakeHours = prefs.getInt('surge_prewake_h') ?? _surgePrewakeHours;
+    _surgeHrRiseBpm = prefs.getInt('surge_hr_rise_bpm') ?? _surgeHrRiseBpm;
+    _surgeSteps30Min = prefs.getInt('surge_steps_30m') ?? _surgeSteps30Min;
+    _surgeWakeEarliestHour = prefs.getInt('surge_wake_earliest_h') ?? _surgeWakeEarliestHour;
+    _surgeWakeLatestHour = prefs.getInt('surge_wake_latest_h') ?? _surgeWakeLatestHour;
     await _loadEvents(prefs);
     if (!mounted) return;
     setState(() {
@@ -188,6 +204,13 @@ class _LatestBPPageState extends State<LatestBPPage> {
     await prefs.setString('bp_arm', _bpArm);
     await prefs.setBool('pdf_include_both_charts', _pdfIncludeBothCharts);
     await _saveEvents(prefs);
+    await prefs.setInt('surge_morning_window_h', _surgeMorningWindowHours);
+    await prefs.setInt('surge_trough_window_h', _surgeTroughWindowHours);
+    await prefs.setInt('surge_prewake_h', _surgePrewakeHours);
+    await prefs.setInt('surge_hr_rise_bpm', _surgeHrRiseBpm);
+    await prefs.setInt('surge_steps_30m', _surgeSteps30Min);
+    await prefs.setInt('surge_wake_earliest_h', _surgeWakeEarliestHour);
+    await prefs.setInt('surge_wake_latest_h', _surgeWakeLatestHour);
   }
 
   Future<void> _fetchData() async {
@@ -652,6 +675,11 @@ class _LatestBPPageState extends State<LatestBPPage> {
       appBar: AppBar(
         title: const Text('Latest Blood Pressure'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.assessment_outlined),
+            tooltip: 'Summaries',
+            onPressed: _openSummaries,
+          ),
           IconButton(
             icon: const Icon(Icons.add),
             onPressed: _showAddBp,
@@ -1131,6 +1159,45 @@ class _LatestBPPageState extends State<LatestBPPage> {
     );
   }
 
+  Future<void> _openSummaries() async {
+    final st = await _bpStatsForSeries(_series);
+    if (!mounted) return;
+    showModalBottomSheet(context: context, builder: (ctx){
+      return SafeArea(child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Summaries', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            _summaryRow('Day mean SBP', st.dayMeanS, suffix: ' mmHg'),
+            _summaryRow('Night mean SBP', st.nightMeanS, suffix: ' mmHg'),
+            _summaryRow('Day mean DBP', st.dayMeanD, suffix: ' mmHg'),
+            _summaryRow('Night mean DBP', st.nightMeanD, suffix: ' mmHg'),
+            _summaryRow('Dipping SBP', st.dipS, suffix: ' %', digits: 1),
+            _summaryRow('Dipping DBP', st.dipD, suffix: ' %', digits: 1),
+            _summaryRow('Morning surge SBP', st.morningSurgeS, suffix: ' mmHg'),
+            _summaryRow('Morning surge DBP', st.morningSurgeD, suffix: ' mmHg'),
+            if (st.morningSurgeStrictSts != null)
+              _summaryRow('STS (strict)', st.morningSurgeStrictSts, suffix: ' mmHg'),
+            if (st.morningSurgeStrictPrewake != null)
+              _summaryRow('Prewaking (strict)', st.morningSurgeStrictPrewake, suffix: ' mmHg'),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ));
+    });
+  }
+
+  Widget _summaryRow(String label, double? v, {String suffix = '', int digits = 0}) {
+    final text = v == null ? '-' : v.toStringAsFixed(digits) + suffix;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(children: [Expanded(child: Text(label)), Text(text, style: const TextStyle(fontWeight: FontWeight.w600))]),
+    );
+  }
+
   Future<void> _openAdvancedSettings() async {
     await showModalBottomSheet(
       context: context,
@@ -1169,6 +1236,24 @@ class _LatestBPPageState extends State<LatestBPPage> {
                       ])),
                   ]),
                   const Divider(),
+                  const SizedBox(height: 8),
+                  const Text('Strict Morning Surge'),
+                  const SizedBox(height: 6),
+                  Wrap(runSpacing: 6, spacing: 12, children: [
+                    SizedBox(width: 170, child: _NumField(label: 'Morning window (h)', value: _surgeMorningWindowHours, onChanged: (v){ setState(()=> _surgeMorningWindowHours = v); _savePrefs(); })),
+                    SizedBox(width: 170, child: _NumField(label: 'Trough window (h)', value: _surgeTroughWindowHours, onChanged: (v){ setState(()=> _surgeTroughWindowHours = v); _savePrefs(); })),
+                    SizedBox(width: 170, child: _NumField(label: 'Prewaking (h)', value: _surgePrewakeHours, onChanged: (v){ setState(()=> _surgePrewakeHours = v); _savePrefs(); })),
+                  ]),
+                  const SizedBox(height: 6),
+                  Wrap(runSpacing: 6, spacing: 12, children: [
+                    SizedBox(width: 170, child: _NumField(label: 'HR rise threshold (bpm)', value: _surgeHrRiseBpm, onChanged: (v){ setState(()=> _surgeHrRiseBpm = v); _savePrefs(); })),
+                    SizedBox(width: 170, child: _NumField(label: 'Steps in 30 min', value: _surgeSteps30Min, onChanged: (v){ setState(()=> _surgeSteps30Min = v); _savePrefs(); })),
+                  ]),
+                  const SizedBox(height: 6),
+                  Wrap(runSpacing: 6, spacing: 12, children: [
+                    SizedBox(width: 170, child: _NumField(label: 'Wake earliest hr', value: _surgeWakeEarliestHour, onChanged: (v){ setState(()=> _surgeWakeEarliestHour = v); _savePrefs(); })),
+                    SizedBox(width: 170, child: _NumField(label: 'Wake latest hr', value: _surgeWakeLatestHour, onChanged: (v){ setState(()=> _surgeWakeLatestHour = v); _savePrefs(); })),
+                  ]),
                   const Text('Events (Bookmarks)'),
                   const SizedBox(height: 8),
                   Row(children: [
@@ -1724,46 +1809,24 @@ class _LatestBPPageState extends State<LatestBPPage> {
 
   // ------- Summary stats helpers -------
   Future<_BpStats> _bpStatsForSeries(List<_BPEntry> s) async {
-    bool isDay(DateTime t) => t.hour >= 6 && t.hour < 22;
-    bool isNight(DateTime t) => !isDay(t);
-    bool isMorning(DateTime t) => t.hour >= 6 && t.hour < 10;
-    bool isEarlyMorning(DateTime t) => t.hour >= 2 && t.hour < 6;
-
-    final dayS = <double>[]; final nightS = <double>[];
-    final dayD = <double>[]; final nightD = <double>[];
-    final morningS = <double>[]; final morningD = <double>[];
-    final earlyS = <double>[]; final earlyD = <double>[];
-    for (final e in s) {
-      final t = e.timestamp; if (t == null) continue;
-      if (e.systolic != null) {
-        if (isDay(t)) dayS.add(e.systolic!); else nightS.add(e.systolic!);
-        if (isMorning(t)) morningS.add(e.systolic!);
-        if (isEarlyMorning(t)) earlyS.add(e.systolic!);
-      }
-      if (e.diastolic != null) {
-        if (isDay(t)) dayD.add(e.diastolic!); else nightD.add(e.diastolic!);
-        if (isMorning(t)) morningD.add(e.diastolic!);
-        if (isEarlyMorning(t)) earlyD.add(e.diastolic!);
-      }
-    }
-    double? mean(List<double> a) => a.isEmpty ? null : (a.reduce((x,y)=>x+y)/a.length);
-    final dayMeanS = mean(dayS), nightMeanS = mean(nightS);
-    final dayMeanD = mean(dayD), nightMeanD = mean(nightD);
-    double? dip(double? day, double? night) => (day != null && night != null && day > 0) ? ((day - night) / day * 100.0) : null;
-    final dipS = dip(dayMeanS, nightMeanS);
-    final dipD = dip(dayMeanD, nightMeanD);
-    final morningSurgeS = (mean(morningS) != null && mean(earlyS) != null) ? (mean(morningS)! - mean(earlyS)!) : null;
-    final morningSurgeD = (mean(morningD) != null && mean(earlyD) != null) ? (mean(morningD)! - mean(earlyD)!) : null;
-    // Strict morning surge variants
-    final strict = await _computeMorningSurgeStrict(s);
-
+    final pts = s.map((e)=> met.BpPoint(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList();
+    final params = met.SurgeParams(
+      morningWindowHours: _surgeMorningWindowHours,
+      troughWindowHours: _surgeTroughWindowHours,
+      prewakeHours: _surgePrewakeHours,
+      hrRiseBpm: _surgeHrRiseBpm,
+      steps30Min: _surgeSteps30Min,
+      wakeEarliestHour: _surgeWakeEarliestHour,
+      wakeLatestHour: _surgeWakeLatestHour,
+    );
+    final st = await met.computeBpStats(points: pts, health: _health, params: params);
     return _BpStats(
-      dayMeanS: dayMeanS, nightMeanS: nightMeanS,
-      dayMeanD: dayMeanD, nightMeanD: nightMeanD,
-      dipS: dipS, dipD: dipD,
-      morningSurgeS: morningSurgeS, morningSurgeD: morningSurgeD,
-      morningSurgeStrictSts: strict.sts,
-      morningSurgeStrictPrewake: strict.prewake,
+      dayMeanS: st.dayMeanS, nightMeanS: st.nightMeanS,
+      dayMeanD: st.dayMeanD, nightMeanD: st.nightMeanD,
+      dipS: st.dipS, dipD: st.dipD,
+      morningSurgeS: st.morningSurgeS, morningSurgeD: st.morningSurgeD,
+      morningSurgeStrictSts: st.morningSurgeStrictSts,
+      morningSurgeStrictPrewake: st.morningSurgeStrictPrewake,
     );
   }
 
@@ -1816,155 +1879,6 @@ class _LatestBPPageState extends State<LatestBPPage> {
   }
 
   // ---- Strict morning surge (heuristics) ----
-  Future<_StrictSurge> _computeMorningSurgeStrict(List<_BPEntry> s) async {
-    final times = s.where((e)=>e.timestamp!=null).map((e)=>e.timestamp!).toList()..sort();
-    if (times.isEmpty) return const _StrictSurge();
-    final start = times.first.subtract(const Duration(days: 1));
-    final end = times.last.add(const Duration(days: 1));
-    final wakes = await _inferWakeTimesStrict(start, end);
-
-    // Group SBP by day
-    final byDay = <DateTime, List<_BPEntry>>{};
-    for (final e in s) {
-      final t = e.timestamp; if (t == null || e.systolic == null) continue;
-      final day = DateTime(t.year, t.month, t.day);
-      (byDay[day] ??= []).add(e);
-    }
-
-    double? stsSum; int stsN = 0;
-    double? preSum; int preN = 0;
-    for (final day in byDay.keys) {
-      final wake = wakes[day];
-      if (wake == null) continue;
-      final list = byDay[day]!;
-      // windows
-      final morningStart = wake;
-      final morningEnd = wake.add(const Duration(hours: 2));
-      final preStart = wake.subtract(const Duration(hours: 2));
-      final preEnd = wake;
-      final troughStart = wake.subtract(const Duration(hours: 6));
-      final troughEnd = wake;
-      double? maxMorning;
-      double? minTrough;
-      double sumPre = 0; int nPre = 0;
-      for (final e in list) {
-        final t = e.timestamp!;
-        final v = e.systolic!;
-        if (!t.isBefore(morningEnd) && !t.isAfter(morningStart)) {}
-        if (t.isAfter(morningStart) && !t.isAfter(morningEnd)) {
-          maxMorning = (maxMorning == null) ? v : math.max(maxMorning, v);
-        }
-        if (t.isAfter(troughStart) && !t.isAfter(troughEnd)) {
-          minTrough = (minTrough == null) ? v : math.min(minTrough, v);
-        }
-        if (t.isAfter(preStart) && !t.isAfter(preEnd)) { sumPre += v; nPre++; }
-      }
-      if (maxMorning != null && minTrough != null) { stsSum = (stsSum ?? 0) + (maxMorning - minTrough); stsN++; }
-      if (maxMorning != null && nPre > 0) { preSum = (preSum ?? 0) + (maxMorning - (sumPre / nPre)); preN++; }
-    }
-    return _StrictSurge(
-      sts: (stsSum != null && stsN > 0) ? (stsSum / stsN) : null,
-      prewake: (preSum != null && preN > 0) ? (preSum / preN) : null,
-    );
-  }
-
-  Future<Map<DateTime, DateTime>> _inferWakeTimesStrict(DateTime start, DateTime end) async {
-    final map = <DateTime, DateTime>{};
-    // 1) Try sleep segments
-    try {
-      final sleep = await _health.getHealthDataFromTypes(types: [HealthDataType.SLEEP_ASLEEP], startTime: start, endTime: end);
-      final byDay = <DateTime, List<HealthDataPoint>>{};
-      for (final p in sleep) {
-        final d = DateTime(p.dateTo.year, p.dateTo.month, p.dateTo.day);
-        (byDay[d] ??= []).add(p);
-      }
-      for (final e in byDay.entries) {
-        // pick the segment whose end is between 03:00 and 11:00, latest end wins
-        DateTime? best;
-        for (final p in e.value) {
-          final lt = p.dateTo.toLocal();
-          if (lt.hour >= 3 && lt.hour <= 11) {
-            if (best == null || lt.isAfter(best)) best = lt;
-          }
-        }
-        if (best != null) map[e.key] = best;
-      }
-    } catch (_) {}
-
-    // Helper to set wake if not present
-    void setIfEmpty(DateTime key, DateTime value) { map.putIfAbsent(key, () => value); }
-
-    // 2) Try steps heuristic if day missing
-    try {
-      final steps = await _health.getHealthDataFromTypes(types: [HealthDataType.STEPS], startTime: start, endTime: end);
-      // Build per-day 15-min bins
-      final bins = <DateTime, List<double>>{}; // key = day, 96 bins
-      for (final p in steps) {
-        final from = p.dateFrom.toLocal();
-        final to = p.dateTo.toLocal();
-        double val = _toDouble(p.value) ?? 0;
-        DateTime cur = from;
-        while (cur.isBefore(to)) {
-          final day = DateTime(cur.year, cur.month, cur.day);
-          final idx = ((cur.hour * 60 + cur.minute) / 15).floor().clamp(0, 95);
-          final list = bins.putIfAbsent(day, () => List<double>.filled(96, 0));
-          // naive split
-          list[idx] += val;
-          cur = cur.add(const Duration(minutes: 15));
-        }
-      }
-      for (final e in bins.entries) {
-        if (map.containsKey(e.key)) continue;
-        // rolling 30-min threshold between 04:00–11:00
-        final l = e.value;
-        for (int i = 16; i <= 44; i++) { // 4:00 -> 11:00
-          final sum30 = l[i] + (i + 1 < l.length ? l[i + 1] : 0);
-          if (sum30 >= 100) {
-            final wake = DateTime(e.key.year, e.key.month, e.key.day).add(Duration(minutes: i * 15));
-            setIfEmpty(e.key, wake);
-            break;
-          }
-        }
-      }
-    } catch (_) {}
-
-    // 3) Try HR heuristic
-    try {
-      final hr = await _health.getHealthDataFromTypes(types: [HealthDataType.HEART_RATE], startTime: start, endTime: end);
-      final byDay = <DateTime, List<_SecSample>>{};
-      for (final p in hr) {
-        final d = DateTime(p.dateTo.year, p.dateTo.month, p.dateTo.day);
-        final v = _toDouble(p.value);
-        if (v == null) continue;
-        (byDay[d] ??= []).add(_SecSample(t: p.dateTo.toLocal(), v: v));
-      }
-      for (final e in byDay.entries) {
-        if (map.containsKey(e.key)) continue;
-        final points = e.value..sort((a,b)=>a.t.compareTo(b.t));
-        // baseline 02:00–05:00 median
-        final baseVals = points.where((p)=> p.t.hour>=2 && p.t.hour<5).map((p)=>p.v).toList()..sort();
-        if (baseVals.isEmpty) continue;
-        double baseline = baseVals[baseVals.length ~/ 2];
-        // earliest time after 05:00 with 20-min avg >= baseline+10
-        for (int i = 0; i < points.length; i++) {
-          final t = points[i].t;
-          if (t.hour < 5) continue;
-          // 20-min window avg
-          double sum = 0; int n = 0;
-          for (int j = i; j < points.length; j++) {
-            if (points[j].t.difference(t).inMinutes > 20) break;
-            sum += points[j].v; n++;
-          }
-          if (n > 0 && (sum / n) >= baseline + 10) {
-            setIfEmpty(e.key, t);
-            break;
-          }
-        }
-      }
-    } catch (_) {}
-
-    return map;
-  }
 
   final GlobalKey _trendChartKey = GlobalKey(); // visible trend
   final GlobalKey _avgChartKey = GlobalKey();   // visible average-day
@@ -2027,6 +1941,23 @@ class _LatestTable extends StatelessWidget {
     final d = t.toLocal();
     String two(int n) => n.toString().padLeft(2, '0');
     return '${two(d.hour)}:${two(d.minute)}';
+  }
+}
+
+class _NumField extends StatelessWidget {
+  final String label;
+  final int value;
+  final ValueChanged<int> onChanged;
+  const _NumField({required this.label, required this.value, required this.onChanged});
+  @override
+  Widget build(BuildContext context) {
+    final ctl = TextEditingController(text: value.toString());
+    return TextField(
+      controller: ctl,
+      keyboardType: const TextInputType.numberWithOptions(signed: false, decimal: false),
+      decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
+      onSubmitted: (s){ final v = int.tryParse(s.trim()); if (v!=null) onChanged(v); },
+    );
   }
 }
 
@@ -3034,11 +2965,7 @@ class _BpStats {
   const _BpStats({this.dayMeanS, this.nightMeanS, this.dayMeanD, this.nightMeanD, this.dipS, this.dipD, this.morningSurgeS, this.morningSurgeD, this.morningSurgeStrictSts, this.morningSurgeStrictPrewake});
 }
 
-class _StrictSurge {
-  final double? sts;
-  final double? prewake;
-  const _StrictSurge({this.sts, this.prewake});
-}
+// Strict surge logic moved to services/metrics.dart
 
 class _LegendDot extends StatelessWidget {
   final Color color;
