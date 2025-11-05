@@ -51,12 +51,20 @@ Future<BpStats> computeBpStats({required List<BpPoint> points, required Health h
   for (final e in points) {
     final t = e.t; if (t == null) continue;
     if (e.sbp != null) {
-      if (isDay(t)) dayS.add(e.sbp!); else nightS.add(e.sbp!);
+      if (isDay(t)) {
+        dayS.add(e.sbp!);
+      } else {
+        nightS.add(e.sbp!);
+      }
       if (isMorning(t)) morningS.add(e.sbp!);
       if (isEarlyMorning(t)) earlyS.add(e.sbp!);
     }
     if (e.dbp != null) {
-      if (isDay(t)) dayD.add(e.dbp!); else nightD.add(e.dbp!);
+      if (isDay(t)) {
+        dayD.add(e.dbp!);
+      } else {
+        nightD.add(e.dbp!);
+      }
       if (isMorning(t)) morningD.add(e.dbp!);
       if (isEarlyMorning(t)) earlyD.add(e.dbp!);
     }

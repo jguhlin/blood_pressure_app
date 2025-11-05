@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:health/health.dart';
-import 'package:fl_chart/fl_chart.dart';
-import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
@@ -14,6 +12,11 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:flutter/rendering.dart';
 import 'services/metrics.dart' as met;
+import 'services/avg_day.dart' as avg;
+import 'models/chart_models.dart' as cm;
+import 'widgets/trend_chart.dart';
+import 'widgets/average_day_chart.dart';
+import 'widgets/average_day_compare_chart.dart';
 
 void main() => runApp(const BPApp());
 
@@ -29,29 +32,7 @@ class BPApp extends StatelessWidget {
   }
 }
 
-// Build blood pressure category background when only one metric is visible
-RangeAnnotations _zoneAnnotations({required bool showSys, required bool showDia}) {
-  if (showSys == showDia) return const RangeAnnotations();
-  final isSys = showSys && !showDia;
-  final bands = <HorizontalRangeAnnotation>[];
-  if (isSys) {
-    bands.addAll([
-      HorizontalRangeAnnotation(y1: 0, y2: 120, color: const Color(0x1128A745)), // green
-      HorizontalRangeAnnotation(y1: 120, y2: 130, color: const Color(0x11FFC107)), // yellow
-      HorizontalRangeAnnotation(y1: 130, y2: 140, color: const Color(0x11FF9800)), // orange
-      HorizontalRangeAnnotation(y1: 140, y2: 180, color: const Color(0x11F44336)), // red
-      HorizontalRangeAnnotation(y1: 180, y2: 300, color: const Color(0x11B71C1C)), // dark red
-    ]);
-  } else {
-    bands.addAll([
-      HorizontalRangeAnnotation(y1: 0, y2: 80, color: const Color(0x1128A745)),
-      HorizontalRangeAnnotation(y1: 80, y2: 90, color: const Color(0x11FFC107)),
-      HorizontalRangeAnnotation(y1: 90, y2: 120, color: const Color(0x11F44336)),
-      HorizontalRangeAnnotation(y1: 120, y2: 300, color: const Color(0x11B71C1C)),
-    ]);
-  }
-  return RangeAnnotations(horizontalRangeAnnotations: bands);
-}
+// BP zone backgrounds now provided by widgets/chart_utils.dart
 
 class LatestBPPage extends StatefulWidget {
   final bool autoFetch;
@@ -88,8 +69,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
   String _bpArm = 'left_upper_arm'; // left_upper_arm, right_upper_arm, wrist
   _BPEntry? _latest;
   List<_BPEntry> _series = const [];
-  List<_SecPoint> _secSeries = const [];
-  List<_SecSample> _secSamples = const [];
+  List<cm.ChartSecPoint> _secSeries = const [];
+  List<cm.ChartSecSample> _secSamples = const [];
   int _listLimit = 100;
   bool _listLoadingMore = false;
   int _rangeDays = 30;
@@ -267,7 +248,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
 
       final series = _combineSeries(points);
       // Secondary metric
-      List<_SecPoint> sec = const [];
+      List<cm.ChartSecPoint> sec = const [];
       if (_secondMetric != 'none') {
         sec = await _fetchSecondary(_rangeStart, _rangeEnd);
         _secSamples = await _fetchSecondarySeries(_rangeStart, _rangeEnd);
@@ -289,7 +270,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
     }
   }
 
-  Future<List<_SecPoint>> _fetchSecondary(DateTime start, DateTime end) async {
+  Future<List<cm.ChartSecPoint>> _fetchSecondary(DateTime start, DateTime end) async {
     HealthDataType? t;
     switch (_secondMetric) {
       case 'hr': t = HealthDataType.HEART_RATE; break;
@@ -324,9 +305,9 @@ class _LatestBPPageState extends State<LatestBPPage> {
             }
           } catch (_) {}
         }
-        final out = <_SecPoint>[];
+        final out = <cm.ChartSecPoint>[];
         for (final e in byDayMin.entries) {
-          out.add(_SecPoint(date: e.key, value: e.value));
+          out.add(cm.ChartSecPoint(date: e.key, value: e.value));
         }
         out.sort((a,b)=>a.date.compareTo(b.date));
         return out;
@@ -345,13 +326,13 @@ class _LatestBPPageState extends State<LatestBPPage> {
         if (v == null) continue;
         (byDay[day] ??= []).add(v);
       }
-      final out = <_SecPoint>[];
+      final out = <cm.ChartSecPoint>[];
       for (final e in byDay.entries) {
         final vals = e.value;
         final agg = (_secondMetric == 'steps' || _secondMetric == 'sleep' || _secondMetric == 'energy')
             ? vals.fold(0.0, (a,b)=>a+b)
             : (vals.reduce((a,b)=>a+b)/vals.length);
-        out.add(_SecPoint(date: e.key, value: agg));
+        out.add(cm.ChartSecPoint(date: e.key, value: agg));
       }
       out.sort((a,b)=>a.date.compareTo(b.date));
       return out;
@@ -360,7 +341,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
     }
   }
 
-  Future<List<_SecSample>> _fetchSecondarySeries(DateTime start, DateTime end) async {
+  Future<List<cm.ChartSecSample>> _fetchSecondarySeries(DateTime start, DateTime end) async {
     HealthDataType? t;
     switch (_secondMetric) {
       case 'hr': t = HealthDataType.HEART_RATE; break;
@@ -373,7 +354,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
     }
     try {
       final pts = await _health.getHealthDataFromTypes(types: [t], startTime: start, endTime: end);
-      final out = <_SecSample>[];
+      final out = <cm.ChartSecSample>[];
       for (final p in pts) {
         double? v = _toDouble(p.value);
         // For sleep-asleep, treat as duration-based metric
@@ -382,7 +363,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
           v ??= 1.0; // any value; we'll use duration for fraction
         }
         if (v == null) continue;
-        out.add(_SecSample(t: p.dateTo, v: v, start: p.dateFrom, end: p.dateTo, durMin: durMin));
+        out.add(cm.ChartSecSample(t: p.dateTo, v: v, start: p.dateFrom, end: p.dateTo, durMin: durMin));
       }
       out.sort((a,b)=>a.t.compareTo(b.t));
       return out;
@@ -1027,9 +1008,9 @@ class _LatestBPPageState extends State<LatestBPPage> {
                 child: SizedBox(
                   height: 260,
                   child: (_seriesA != null && _seriesB != null)
-                      ? _AverageDayCompareChart(
-                          seriesA: _seriesA!,
-                          seriesB: _seriesB!,
+                      ? AverageDayCompareChart(
+                          seriesA: _seriesA!.map((e)=> cm.ChartBp(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList(),
+                          seriesB: _seriesB!.map((e)=> cm.ChartBp(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList(),
                           anchorMinute: _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null,
                           showBands: _showBands,
                         )
@@ -1049,8 +1030,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
                         opacity: _mode == _ViewMode.averageDay ? 1.0 : 0.001,
                         child: RepaintBoundary(
                           key: _avgChartKeyCapture,
-                          child: _AverageDayChart(
-                            series: _series,
+                          child: AverageDayChart(
+                            series: _series.map((e)=> cm.ChartBp(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList(),
                             anchorMinute: _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null,
                             showBands: _showBands,
                             showSys: _showSys,
@@ -1069,8 +1050,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
                       opacity: _mode == _ViewMode.trend ? 1.0 : 0.001,
                       child: RepaintBoundary(
                         key: _trendChartKeyCapture,
-                        child: _TrendChart(
-                          series: _series,
+                        child: TrendChart(
+                          series: _series.map((e)=> cm.ChartBp(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList(),
                           start: _rangeStart,
                           end: _rangeEnd,
                           showSys: _showSys,
@@ -1090,8 +1071,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
                   RepaintBoundary(
                     key: _mode == _ViewMode.trend ? _trendChartKey : _avgChartKey,
                     child: _mode == _ViewMode.trend
-                        ? _TrendChart(
-                            series: _series,
+                        ? TrendChart(
+                            series: _series.map((e)=> cm.ChartBp(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList(),
                             start: _rangeStart,
                             end: _rangeEnd,
                             showSys: _showSys,
@@ -1104,8 +1085,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
                             secondary: _secSeries,
                             secondaryLabel: _secondMetric,
                           )
-                        : _AverageDayChart(
-                            series: _series,
+                        : AverageDayChart(
+                            series: _series.map((e)=> cm.ChartBp(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList(),
                             anchorMinute: _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null,
                             showBands: _showBands,
                             showSys: _showSys,
@@ -1389,7 +1370,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
               const SizedBox(height: 16),
               Align(alignment: Alignment.centerRight, child: ElevatedButton.icon(onPressed: () async {
                 final s = int.tryParse(sysCtl.text.trim()); final d = int.tryParse(diaCtl.text.trim());
-                if (s==null || d==null) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter valid numbers'))); return; }
+                if (s==null || d==null) { if (!mounted) return; ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter valid numbers'))); return; }
                 final ok = await _health.writeBloodPressure(systolic: s, diastolic: d, startTime: when);
                 if (ok) {
                   setState(() { _bpBodyPosition = pos; _bpArm = arm; });
@@ -1399,7 +1380,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
                   if (mounted) Navigator.pop(context);
                   _fetchData();
                 } else {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to save BP to Health Connect')));
+                  if (!mounted) return; ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to save BP to Health Connect')));
                 }
               }, icon: const Icon(Icons.save), label: const Text('Save to Health Connect'))),
             ]),
@@ -1452,7 +1433,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
           buf.writeln('$ts\t${e.systolic?.toStringAsFixed(1) ?? ''}\t${e.diastolic?.toStringAsFixed(1) ?? ''}\t${e.source ?? ''}');
         }
       } else if (_mode == _ViewMode.averageDay) {
-        final agg = _AverageDayAggregator(series: _series).compute(stepMinutes: 15, smoothMinutes: 45);
+        final agg = avg.AverageDayAggregator(series: _series.map((e)=> avg.AvgBpInput(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList()).compute(stepMinutes: 15, smoothMinutes: 45);
         buf.writeln('mode\tstart\tend');
         buf.writeln('average_day\t${_rangeStart.toIso8601String()}\t${_rangeEnd.toIso8601String()}');
         buf.writeln('minute_of_day\ttime_label\tsystolic_mean_mmHg\tdiastolic_mean_mmHg');
@@ -1478,8 +1459,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
         buf.writeln('${_rangeA?.start.toIso8601String() ?? ''}\t${_rangeA?.end.toIso8601String() ?? ''}\t${_rangeB?.start.toIso8601String() ?? ''}\t${_rangeB?.end.toIso8601String() ?? ''}');
         buf.writeln('minute_of_day\ttime_label\tA_systolic\tA_diastolic\tB_systolic\tB_diastolic\tDelta_systolic(B-A)\tDelta_diastolic(B-A)');
         final anchorMin = _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null;
-        final aggA = _AverageDayAggregator(series: _seriesA!).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMin);
-        final aggB = _AverageDayAggregator(series: _seriesB!).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMin);
+        final aggA = avg.AverageDayAggregator(series: _seriesA!.map((e)=> avg.AvgBpInput(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList()).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMin);
+        final aggB = avg.AverageDayAggregator(series: _seriesB!.map((e)=> avg.AvgBpInput(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList()).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMin);
         for (int i = 0; i < aggA.minutes.length; i++) {
           final m = aggA.minutes[i];
           final h = (m / 60).floor();
@@ -1607,7 +1588,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
               _bpStatsTable(bpStats),
               if (_mode == _ViewMode.compare && _seriesA != null && _seriesB != null && aStats != null && bStats != null) ...[
                 pw.SizedBox(height: 12),
-                _compareDeltaTable(aStats!, bStats!),
+                _compareDeltaTable(aStats, bStats),
               ],
               pw.SizedBox(height: 12),
               if (_mode != _ViewMode.compare) ...[
@@ -1764,22 +1745,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
     _annotations = out;
   }
 
-  String _posLabel(String code) {
-    switch (code) {
-      case 'sitting': return 'Sitting';
-      case 'standing': return 'Standing';
-      case 'supine': return 'Supine';
-      default: return '-';
-    }
-  }
-  String _armLabel(String code) {
-    switch (code) {
-      case 'left_upper_arm': return 'Left UA';
-      case 'right_upper_arm': return 'Right UA';
-      case 'wrist': return 'Wrist';
-      default: return '-';
-    }
-  }
+  // old label helpers removed; using static labels in _BpAnn
 
   String _secondarySummaryText() {
     if (_secondMetric == 'none') return '';
@@ -1969,20 +1935,7 @@ class _BPEntry {
   const _BPEntry({this.timestamp, this.systolic, this.diastolic, this.source});
 }
 
-class _SecPoint {
-  final DateTime date;
-  final double value;
-  const _SecPoint({required this.date, required this.value});
-}
-
-class _SecSample {
-  final DateTime t;
-  final double v;
-  final DateTime? start;
-  final DateTime? end;
-  final double? durMin;
-  const _SecSample({required this.t, required this.v, this.start, this.end, this.durMin});
-}
+// old secondary DTOs removed; using models/chart_models.dart
 
 class _BpAnn {
   final DateTime t;
@@ -2013,7 +1966,7 @@ class _BpAnn {
   }
 }
 
-class _TrendChart extends StatelessWidget {
+/* class _TrendChart extends StatelessWidget {
   final List<_BPEntry> series;
   final DateTime start;
   final DateTime end;
@@ -2320,7 +2273,7 @@ class _TrendChart extends StatelessWidget {
     if (i + 1 < sorted.length) return sorted[i] * (1 - frac) + sorted[i + 1] * frac;
     return sorted[i];
   }
-}
+} */
 
 class _Event {
   final String id; final String title; final DateTime date;
@@ -2360,7 +2313,7 @@ class _EventChips extends StatelessWidget {
   }
 }
 
-class _AverageDayChart extends StatelessWidget {
+/* class _AverageDayChart extends StatelessWidget {
   final List<_BPEntry> series;
   final int? anchorMinute; // minutes since midnight
   final bool showBands;
@@ -2660,9 +2613,9 @@ class _AverageDayChart extends StatelessWidget {
     if (m == 0) m = 200;
     return m.clamp(60.0, 300.0);
   }
-}
+} */
 
-class _AverageDayCompareChart extends StatelessWidget {
+/* class _AverageDayCompareChart extends StatelessWidget {
   final List<_BPEntry> seriesA;
   final List<_BPEntry> seriesB;
   final int? anchorMinute; // minutes since midnight
@@ -2743,9 +2696,9 @@ class _AverageDayCompareChart extends StatelessWidget {
       ),
     );
   }
-}
+} */
 
-class _AverageDayAggregator {
+/* class _AverageDayAggregator {
   final List<_BPEntry> series;
   _AverageDayAggregator({required this.series});
 
@@ -2916,9 +2869,9 @@ class _AverageDayAggregator {
       diaUpper: withBands ? upper(diaSmooth, diaStd, diaN) : null,
     );
   }
-}
+} */
 
-class _DayBins {
+/* class _DayBins {
   final List<double> sysSum;
   final List<double> diaSum;
   final List<double> sysW;
@@ -2928,9 +2881,9 @@ class _DayBins {
         diaSum = List.filled(bins, 0),
         sysW = List.filled(bins, 0),
         diaW = List.filled(bins, 0);
-}
+} */
 
-class _AvgDay {
+/* class _AvgDay {
   final List<int> minutes; // minutes since midnight
   final List<double?> sysMean; // smoothed means
   final List<double?> diaMean;
@@ -2947,7 +2900,7 @@ class _AvgDay {
     this.diaLower,
     this.diaUpper,
   });
-}
+} */
 
 enum _ViewMode { trend, averageDay, compare }
 
@@ -3021,11 +2974,11 @@ class _SummaryCards extends StatelessWidget {
 
     late final List<_CardData> cards;
     if (mode == _ViewMode.compare) {
-      final aggA = _AverageDayAggregator(series: seriesA!).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMinute);
-      final aggB = _AverageDayAggregator(series: seriesB!).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMinute);
+      final aggA = avg.AverageDayAggregator(series: seriesA!.map((e)=> avg.AvgBpInput(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList()).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMinute);
+      final aggB = avg.AverageDayAggregator(series: seriesB!.map((e)=> avg.AvgBpInput(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList()).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMinute);
       cards = _buildCompareCards(aggA, aggB);
     } else {
-      final agg = _AverageDayAggregator(series: series).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMinute);
+      final agg = avg.AverageDayAggregator(series: series.map((e)=> avg.AvgBpInput(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList()).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMinute);
       cards = _buildSingleCards(agg);
     }
 
@@ -3036,7 +2989,7 @@ class _SummaryCards extends StatelessWidget {
     );
   }
 
-  List<_CardData> _buildSingleCards(_AvgDay agg) {
+  List<_CardData> _buildSingleCards(avg.AvgDay agg) {
     final segs = _segments();
     return [
       for (final s in segs)
@@ -3048,7 +3001,7 @@ class _SummaryCards extends StatelessWidget {
     ];
   }
 
-  List<_CardData> _buildCompareCards(_AvgDay a, _AvgDay b) {
+  List<_CardData> _buildCompareCards(avg.AvgDay a, avg.AvgDay b) {
     final segs = _segments();
     return [
       for (final s in segs)
