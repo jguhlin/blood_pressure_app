@@ -113,6 +113,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
     _trendSmoothDays = prefs.getInt('trend_smooth_days') ?? _trendSmoothDays;
     _trendSmoothMethod = prefs.getString('trend_smooth_method') ?? _trendSmoothMethod;
     _trendSmoothAuto = prefs.getBool('trend_smooth_auto') ?? _trendSmoothAuto;
+    _trendTooltips = prefs.getBool('trend_tooltips') ?? _trendTooltips;
     await _loadEvents(prefs);
     if (!mounted) return;
     setState(() {
@@ -162,6 +163,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
     await prefs.setInt('trend_smooth_days', _trendSmoothDays);
     await prefs.setString('trend_smooth_method', _trendSmoothMethod);
     await prefs.setBool('trend_smooth_auto', _trendSmoothAuto);
+    await prefs.setBool('trend_tooltips', _trendTooltips);
     await _saveEvents(prefs);
   }
 
@@ -666,11 +668,11 @@ class _LatestBPPageState extends State<LatestBPPage> {
                 ],
               ),
             const SizedBox(height: 12),
-            Wrap(
-              spacing: 12,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
                 const Text('View:'),
                 ToggleButtons(
                   isSelected: [
@@ -700,6 +702,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
                       Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('Distribution')),
                     ],
                   ),
+                IconButton(icon: const Icon(Icons.info_outline), tooltip: 'Chart help', onPressed: _showHelp),
                 if (_mode == _ViewMode.trend && _trendDistribution)
                   Row(children: [
                     const Text('Tooltips'),
@@ -813,10 +816,18 @@ class _LatestBPPageState extends State<LatestBPPage> {
                 ],
               ),
             const SizedBox(height: 8),
+            // Event chips (quick bookmarks)
             if (_mode != _ViewMode.compare)
               _EventChips(
                 events: _events.take(5).toList(),
                 onTap: _setRangeFromEvent,
+                onMore: _openAdvancedSettings,
+              )
+            else
+              _EventChips(
+                events: _events.take(5).toList(),
+                onTapA: _setRangeAFromEvent,
+                onTapB: _setRangeBFromEvent,
                 onMore: _openAdvancedSettings,
               ),
             const SizedBox(height: 8),
@@ -967,6 +978,37 @@ class _LatestBPPageState extends State<LatestBPPage> {
         });
       },
     );
+  }
+
+  void _showHelp() {
+    showDialog(context: context, builder: (ctx){
+      return AlertDialog(
+        title: const Text('Chart Help'),
+        content: const SizedBox(
+          width: 400,
+          child: SingleChildScrollView(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Trend vs Distribution'),
+              SizedBox(height: 8),
+              Text('• Lines: plots individual readings over calendar time.'),
+              Text('• Distribution: summarizes each day with median (line) and IQR (shaded band). Days with no readings are filled by interpolation.'),
+              SizedBox(height: 12),
+              Text('Smoothing'),
+              SizedBox(height: 8),
+              Text('• Applies a moving average (MA) or exponential moving average (EMA) over daily medians/IQR.'),
+              Text('• Window can be auto-tied to the date range or set manually (odd days).'),
+              SizedBox(height: 12),
+              Text('BP Zones'),
+              SizedBox(height: 8),
+              Text('• Background color bands appear when only one metric is enabled.'),
+              Text('• SBP: <120 green, 120–129 yellow, 130–139 orange, 140–179 red, 180+ dark red.'),
+              Text('• DBP: <80 green, 80–89 yellow, 90–119 red, 120+ dark red.'),
+            ]),
+          ),
+        ),
+        actions: [TextButton(onPressed: ()=> Navigator.pop(ctx), child: const Text('Close'))],
+      );
+    });
   }
 
   Future<String?> _promptText(BuildContext context, String title, String initial) async {
@@ -1392,22 +1434,30 @@ class _Event {
 
 class _EventChips extends StatelessWidget {
   final List<_Event> events;
-  final Future<void> Function(_Event) onTap;
+  final Future<void> Function(_Event)? onTap;
+  final Future<void> Function(_Event)? onTapA;
+  final Future<void> Function(_Event)? onTapB;
   final Future<void> Function() onMore;
-  const _EventChips({required this.events, required this.onTap, required this.onMore});
+  const _EventChips({required this.events, this.onTap, this.onTapA, this.onTapB, required this.onMore});
   @override
   Widget build(BuildContext context) {
     if (events.isEmpty) return const SizedBox.shrink();
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(children: [
-        for (final e in events) Padding(
-          padding: const EdgeInsets.only(right: 8),
-          child: ActionChip(
-            label: Text('${e.title} (${e.date.month}/${e.date.day})'),
-            onPressed: () => onTap(e),
+        for (final e in events)
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: onTap != null
+                ? ActionChip(
+                    label: Text('${e.title} (${e.date.month}/${e.date.day})'),
+                    onPressed: () => onTap!(e),
+                  )
+                : Wrap(spacing: 6, children: [
+                    ActionChip(label: Text('A: ${e.title.split(' ').first}'), onPressed: onTapA!=null? ()=> onTapA!(e): null),
+                    ActionChip(label: Text('B: ${e.title.split(' ').first}'), onPressed: onTapB!=null? ()=> onTapB!(e): null),
+                  ]),
           ),
-        ),
         ActionChip(label: const Text('More…'), onPressed: onMore),
       ]),
     );
