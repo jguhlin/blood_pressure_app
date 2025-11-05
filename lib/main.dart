@@ -36,6 +36,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
   bool _hasPermissions = false;
   _BPEntry? _latest;
   List<_BPEntry> _series = const [];
+  int _listLimit = 100;
+  bool _listLoadingMore = false;
   int _rangeDays = 30;
   bool _isCustomRange = false;
   late DateTime _rangeEnd;
@@ -287,6 +289,35 @@ class _LatestBPPageState extends State<LatestBPPage> {
     }
   }
 
+  Future<void> _loadMoreReadings() async {
+    if (_listLoadingMore) return;
+    setState(() => _listLoadingMore = true);
+    try {
+      // Extend window 90 days earlier and refetch
+      _rangeStart = _rangeStart.subtract(const Duration(days: 90));
+      _isCustomRange = true;
+      await _fetchData();
+      setState(() => _listLimit += 100);
+      await _savePrefs();
+    } finally {
+      if (mounted) setState(() => _listLoadingMore = false);
+    }
+  }
+
+  Future<void> _loadMoreReadingsCompare() async {
+    if (_listLoadingMore || _rangeA == null || _rangeB == null) return;
+    setState(() => _listLoadingMore = true);
+    try {
+      _rangeA = DateTimeRange(start: _rangeA!.start.subtract(const Duration(days: 90)), end: _rangeA!.end);
+      _rangeB = DateTimeRange(start: _rangeB!.start.subtract(const Duration(days: 90)), end: _rangeB!.end);
+      await _savePrefs();
+      await _fetchCompare();
+      setState(() => _listLimit += 100);
+    } finally {
+      if (mounted) setState(() => _listLoadingMore = false);
+    }
+  }
+
   String _labelRange(String tag, DateTimeRange r) {
     String mmdd(DateTime d) => '${d.month}/${d.day}';
     return '$tag: ${mmdd(r.start)}–${mmdd(r.end)}';
@@ -482,7 +513,10 @@ class _LatestBPPageState extends State<LatestBPPage> {
                 ],
               )
             else
-              Row(
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   OutlinedButton.icon(
                     onPressed: () async {
@@ -517,7 +551,6 @@ class _LatestBPPageState extends State<LatestBPPage> {
                     icon: const Icon(Icons.looks_two, size: 18),
                     label: Text(_rangeB == null ? 'Pick Range B' : _labelRange('B', _rangeB!)),
                   ),
-                  const SizedBox(width: 8),
                   ElevatedButton.icon(
                     onPressed: (_rangeA != null && _rangeB != null && !_loading) ? _fetchCompare : null,
                     icon: const Icon(Icons.play_arrow, size: 18),
@@ -592,35 +625,24 @@ class _LatestBPPageState extends State<LatestBPPage> {
             ),
             // Legend: systolic/diastolic with units or compare A/B
             if (_mode != _ViewMode.compare)
-              Row(
+              Wrap(
+                spacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: const [
-                  _LegendDot(color: Colors.red),
-                  SizedBox(width: 6),
-                  Text('Systolic (mmHg)'),
-                  SizedBox(width: 16),
-                  _LegendDot(color: Colors.blue),
-                  SizedBox(width: 6),
-                  Text('Diastolic (mmHg)'),
+                  _LegendDot(color: Colors.red), Text('Systolic (mmHg)'),
+                  _LegendDot(color: Colors.blue), Text('Diastolic (mmHg)'),
                 ],
               )
             else
-              Row(
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: const [
-                  _LegendDot(color: Colors.red),
-                  SizedBox(width: 6),
-                  Text('A: Systolic'),
-                  SizedBox(width: 12),
-                  _LegendDot(color: Colors.blue),
-                  SizedBox(width: 6),
-                  Text('A: Diastolic'),
-                  SizedBox(width: 18),
-                  _LegendDot(color: Colors.orange),
-                  SizedBox(width: 6),
-                  Text('B: Systolic'),
-                  SizedBox(width: 12),
-                  _LegendDot(color: Colors.lightBlue),
-                  SizedBox(width: 6),
-                  Text('B: Diastolic'),
+                  _LegendDot(color: Colors.red), Text('A: Systolic'),
+                  _LegendDot(color: Colors.blue), Text('A: Diastolic'),
+                  _LegendDot(color: Colors.orange), Text('B: Systolic'),
+                  _LegendDot(color: Colors.lightBlue), Text('B: Diastolic'),
                 ],
               ),
             const SizedBox(height: 8),
@@ -656,6 +678,16 @@ class _LatestBPPageState extends State<LatestBPPage> {
               seriesA: _seriesA,
               seriesB: _seriesB,
               anchorMinute: _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null,
+            ),
+            const SizedBox(height: 16),
+            _ReadingsSection(
+              mode: _mode,
+              entries: _series,
+              entriesA: _seriesA,
+              entriesB: _seriesB,
+              limit: _listLimit,
+              loading: _listLoadingMore,
+              onLoadMore: _mode == _ViewMode.compare ? _loadMoreReadingsCompare : _loadMoreReadings,
             ),
             const SizedBox(height: 16),
             if (_error != null)
@@ -1473,4 +1505,97 @@ class _SummaryCard extends StatelessWidget {
 
   String _f(double? v) => v == null ? '-' : v.toStringAsFixed(0);
   String _fSigned(double? v) => v == null ? '-' : (v >= 0 ? '+${v.toStringAsFixed(0)}' : v.toStringAsFixed(0));
+}
+
+class _ReadingsSection extends StatelessWidget {
+  final _ViewMode mode;
+  final List<_BPEntry> entries;
+  final List<_BPEntry>? entriesA;
+  final List<_BPEntry>? entriesB;
+  final int limit;
+  final bool loading;
+  final Future<void> Function() onLoadMore;
+
+  const _ReadingsSection({
+    required this.mode,
+    required this.entries,
+    required this.limit,
+    required this.loading,
+    required this.onLoadMore,
+    this.entriesA,
+    this.entriesB,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Recent Readings', style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        if (mode != _ViewMode.compare)
+          _buildList(context, entries)
+        else ...[
+          const Text('Range A'),
+          const SizedBox(height: 6),
+          if (entriesA != null) _buildList(context, entriesA!) else const Text('-'),
+          const SizedBox(height: 12),
+          const Text('Range B'),
+          const SizedBox(height: 6),
+          if (entriesB != null) _buildList(context, entriesB!) else const Text('-'),
+        ],
+        const SizedBox(height: 8),
+        Row(children: [
+          ElevatedButton.icon(
+            onPressed: loading ? null : onLoadMore,
+            icon: loading ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.history),
+            label: const Text('Load earlier (90 days)'),
+          ),
+        ]),
+      ],
+    );
+  }
+
+  Widget _buildList(BuildContext context, List<_BPEntry> src) {
+    final list = [...src];
+    list.sort((a, b) => (b.timestamp ?? DateTime(0)).compareTo(a.timestamp ?? DateTime(0)));
+    final shown = list.take(limit).toList();
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 360),
+      decoration: BoxDecoration(border: Border.all(color: Colors.black12), borderRadius: BorderRadius.circular(6)),
+      child: ListView.separated(
+        itemCount: shown.length,
+        itemBuilder: (context, i) {
+          final e = shown[i];
+          return ListTile(
+            dense: true,
+            title: Text(_fmtDate(e.timestamp)),
+            subtitle: Text(_fmtTime(e.timestamp)),
+            trailing: Text(_bpText(e), style: const TextStyle(fontWeight: FontWeight.w600)),
+          );
+        },
+        separatorBuilder: (_, __) => const Divider(height: 1),
+      ),
+    );
+  }
+
+  String _bpText(_BPEntry e) {
+    final s = e.systolic != null ? e.systolic!.toStringAsFixed(0) : '-';
+    final d = e.diastolic != null ? e.diastolic!.toStringAsFixed(0) : '-';
+    return '$s / $d mmHg';
+  }
+
+  String _fmtDate(DateTime? t) {
+    if (t == null) return '-';
+    final d = t.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${d.year}-${two(d.month)}-${two(d.day)}';
+  }
+
+  String _fmtTime(DateTime? t) {
+    if (t == null) return '-';
+    final d = t.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(d.hour)}:${two(d.minute)}';
+  }
 }
