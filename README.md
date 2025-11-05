@@ -1,16 +1,13 @@
 # blood_pressure_app
 
-Android app for plotting blood pressure results from Health Connect
+Android app for plotting blood pressure results from Health Connect.
 
-## Getting Started
+Highlights
+- Trend, Average Day, and Compare views with distribution and smoothing options.
+- Secondary axis for HR, Resting HR, HRV (SDNN/RMSSD), Steps, Sleep (min), Energy (kcal), Exercise Time (min).
+- PDF export with embedded charts and concise summaries (day/night averages, dipping, morning surge + strict variants). Rows include body position/arm when added via the app.
+- TSV export of current view.
 
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Developer Notes
+- See `docs/DEVELOPING.md` for architecture overview and helper locations.
+- Run `flutter analyze` and `dart format .` before committing.
