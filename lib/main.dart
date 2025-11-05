@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:health/health.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -11,6 +12,7 @@ import 'package:flutter/services.dart';
 import 'package:printing/printing.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:flutter/rendering.dart';
 
 void main() => runApp(const BPApp());
 
@@ -72,6 +74,9 @@ class _LatestBPPageState extends State<LatestBPPage> {
   String _trendSmoothMethod = 'ma'; // 'ma' or 'ema'
   bool _trendSmoothAuto = true; // tie window to range length
   String _secondMetric = 'none'; // 'none','resting_hr','steps','sleep'
+  // Add-reading defaults
+  String _bpBodyPosition = 'sitting'; // sitting, standing, supine
+  String _bpArm = 'left_upper_arm'; // left_upper_arm, right_upper_arm, wrist
   _BPEntry? _latest;
   List<_BPEntry> _series = const [];
   List<_SecPoint> _secSeries = const [];
@@ -122,6 +127,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
     _trendTooltips = prefs.getBool('trend_tooltips') ?? _trendTooltips;
     _trendDistribution = prefs.getBool('trend_distribution') ?? _trendDistribution;
     _secondMetric = prefs.getString('second_metric') ?? _secondMetric;
+    _bpBodyPosition = prefs.getString('bp_body_position') ?? _bpBodyPosition;
+    _bpArm = prefs.getString('bp_arm') ?? _bpArm;
     await _loadEvents(prefs);
     if (!mounted) return;
     setState(() {
@@ -174,6 +181,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
     await prefs.setBool('trend_tooltips', _trendTooltips);
     await prefs.setBool('trend_distribution', _trendDistribution);
     await prefs.setString('second_metric', _secondMetric);
+    await prefs.setString('bp_body_position', _bpBodyPosition);
+    await prefs.setString('bp_arm', _bpArm);
     await _saveEvents(prefs);
   }
 
@@ -256,7 +265,10 @@ class _LatestBPPageState extends State<LatestBPPage> {
   Future<List<_SecPoint>> _fetchSecondary(DateTime start, DateTime end) async {
     HealthDataType? t;
     switch (_secondMetric) {
+      case 'hr': t = HealthDataType.HEART_RATE; break;
       case 'resting_hr': t = HealthDataType.RESTING_HEART_RATE; break;
+      case 'hrv_sdnn': t = HealthDataType.HEART_RATE_VARIABILITY_SDNN; break;
+      case 'hrv_rmssd': t = HealthDataType.HEART_RATE_VARIABILITY_RMSSD; break;
       case 'steps': t = HealthDataType.STEPS; break;
       case 'sleep': t = HealthDataType.SLEEP_ASLEEP; break;
       default: return const [];
@@ -286,7 +298,10 @@ class _LatestBPPageState extends State<LatestBPPage> {
   Future<List<_SecSample>> _fetchSecondarySeries(DateTime start, DateTime end) async {
     HealthDataType? t;
     switch (_secondMetric) {
+      case 'hr': t = HealthDataType.HEART_RATE; break;
       case 'resting_hr': t = HealthDataType.RESTING_HEART_RATE; break;
+      case 'hrv_sdnn': t = HealthDataType.HEART_RATE_VARIABILITY_SDNN; break;
+      case 'hrv_rmssd': t = HealthDataType.HEART_RATE_VARIABILITY_RMSSD; break;
       case 'steps': t = HealthDataType.STEPS; break;
       case 'sleep': t = HealthDataType.SLEEP_ASLEEP; break;
       default: return const [];
@@ -591,6 +606,11 @@ class _LatestBPPageState extends State<LatestBPPage> {
         title: const Text('Latest Blood Pressure'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.add),
+            onPressed: _showAddBp,
+            tooltip: 'Add BP Reading',
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loading ? null : _fetchData,
             tooltip: 'Refresh',
@@ -788,7 +808,10 @@ class _LatestBPPageState extends State<LatestBPPage> {
                       value: _secondMetric,
                       items: const [
                         DropdownMenuItem(value: 'none', child: Text('None')),
+                        DropdownMenuItem(value: 'hr', child: Text('Heart Rate')),
                         DropdownMenuItem(value: 'resting_hr', child: Text('Resting HR')),
+                        DropdownMenuItem(value: 'hrv_sdnn', child: Text('HRV SDNN')),
+                        DropdownMenuItem(value: 'hrv_rmssd', child: Text('HRV RMSSD')),
                         DropdownMenuItem(value: 'steps', child: Text('Steps')),
                         DropdownMenuItem(value: 'sleep', child: Text('Sleep (min)')),
                       ],
@@ -922,44 +945,50 @@ class _LatestBPPageState extends State<LatestBPPage> {
               ),
             const SizedBox(height: 8),
             if (_mode == _ViewMode.compare)
-              SizedBox(
-                height: 260,
-                child: (_seriesA != null && _seriesB != null)
-                    ? _AverageDayCompareChart(
-                        seriesA: _seriesA!,
-                        seriesB: _seriesB!,
-                        anchorMinute: _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null,
-                        showBands: _showBands,
-                      )
+              RepaintBoundary(
+                key: _compareChartKey,
+                child: SizedBox(
+                  height: 260,
+                  child: (_seriesA != null && _seriesB != null)
+                      ? _AverageDayCompareChart(
+                          seriesA: _seriesA!,
+                          seriesB: _seriesB!,
+                          anchorMinute: _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null,
+                          showBands: _showBands,
+                        )
                     : const Center(child: Text('Pick two ranges and tap Fetch.')),
+                ),
               )
             else if (_series.isNotEmpty)
-              SizedBox(
-                height: 260,
-                child: _mode == _ViewMode.trend
-                    ? _TrendChart(
-                        series: _series,
-                        start: _rangeStart,
-                        end: _rangeEnd,
-                        showSys: _showSys,
-                        showDia: _showDia,
-                        distribution: _trendDistribution,
-                        tooltipsEnabled: _trendTooltips,
-                        smoothingEnabled: _trendSmoothing,
-                        smoothingWindowDays: _trendSmoothDays,
-                        smoothingMethod: _trendSmoothMethod,
-                        secondary: _secSeries,
-                        secondaryLabel: _secondMetric,
-                      )
-                    : _AverageDayChart(
-                        series: _series,
-                        anchorMinute: _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null,
-                        showBands: _showBands,
-                        showSys: _showSys,
-                        showDia: _showDia,
-                        secondarySamples: (_secondMetric == 'resting_hr') ? _secSamples : const [],
-                        secondaryLabel: _secondMetric,
-                      ),
+              RepaintBoundary(
+                key: _mode == _ViewMode.trend ? _trendChartKey : _avgChartKey,
+                child: SizedBox(
+                  height: 260,
+                  child: _mode == _ViewMode.trend
+                      ? _TrendChart(
+                          series: _series,
+                          start: _rangeStart,
+                          end: _rangeEnd,
+                          showSys: _showSys,
+                          showDia: _showDia,
+                          distribution: _trendDistribution,
+                          tooltipsEnabled: _trendTooltips,
+                          smoothingEnabled: _trendSmoothing,
+                          smoothingWindowDays: _trendSmoothDays,
+                          smoothingMethod: _trendSmoothMethod,
+                          secondary: _secSeries,
+                          secondaryLabel: _secondMetric,
+                        )
+                      : _AverageDayChart(
+                          series: _series,
+                          anchorMinute: _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null,
+                          showBands: _showBands,
+                          showSys: _showSys,
+                          showDia: _showDia,
+                          secondarySamples: (_secondMetric == 'resting_hr' || _secondMetric == 'hr' || _secondMetric == 'hrv_sdnn' || _secondMetric == 'hrv_rmssd') ? _secSamples : const [],
+                          secondaryLabel: _secondMetric,
+                        ),
+                ),
               )
             else
               const Text('No data available for selected range.'),
@@ -1129,6 +1158,72 @@ class _LatestBPPageState extends State<LatestBPPage> {
     });
   }
 
+  Future<void> _showAddBp() async {
+    final sysCtl = TextEditingController();
+    final diaCtl = TextEditingController();
+    DateTime when = DateTime.now();
+    String pos = _bpBodyPosition;
+    String arm = _bpArm;
+    await showModalBottomSheet(context: context, isScrollControlled: true, builder: (ctx){
+      return StatefulBuilder(builder: (context, setSt){
+        Future<void> pickDateTime() async {
+          final d = await showDatePicker(context: context, firstDate: DateTime(2000), lastDate: DateTime.now().add(const Duration(days: 365)), initialDate: when);
+          if (d == null) return; final t = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(when));
+          setSt(()=> when = DateTime(d.year,d.month,d.day, t?.hour ?? when.hour, t?.minute ?? when.minute));
+        }
+        return Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+          child: SingleChildScrollView(child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Add Blood Pressure', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              Row(children:[
+                Expanded(child: TextField(controller: sysCtl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText:'Systolic', border: OutlineInputBorder()))),
+                const SizedBox(width: 8),
+                Expanded(child: TextField(controller: diaCtl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText:'Diastolic', border: OutlineInputBorder()))),
+              ]),
+              const SizedBox(height: 12),
+              Row(children:[
+                OutlinedButton.icon(onPressed: pickDateTime, icon: const Icon(Icons.access_time), label: Text('${when.month}/${when.day}/${when.year} ${when.hour.toString().padLeft(2,'0')}:${when.minute.toString().padLeft(2,'0')}')),
+              ]),
+              const SizedBox(height: 12),
+              Row(children:[
+                const Text('Position'), const SizedBox(width: 6),
+                DropdownButton<String>(value: pos, items: const [
+                  DropdownMenuItem(value:'sitting', child: Text('Sitting')),
+                  DropdownMenuItem(value:'standing', child: Text('Standing')),
+                  DropdownMenuItem(value:'supine', child: Text('Supine')),
+                ], onChanged: (v){ if(v!=null) setSt(()=> pos=v); }),
+                const SizedBox(width: 18),
+                const Text('Arm'), const SizedBox(width: 6),
+                DropdownButton<String>(value: arm, items: const [
+                  DropdownMenuItem(value:'left_upper_arm', child: Text('Left Upper Arm')),
+                  DropdownMenuItem(value:'right_upper_arm', child: Text('Right Upper Arm')),
+                  DropdownMenuItem(value:'wrist', child: Text('Wrist')),
+                ], onChanged: (v){ if(v!=null) setSt(()=> arm=v); }),
+              ]),
+              const SizedBox(height: 16),
+              Align(alignment: Alignment.centerRight, child: ElevatedButton.icon(onPressed: () async {
+                final s = int.tryParse(sysCtl.text.trim()); final d = int.tryParse(diaCtl.text.trim());
+                if (s==null || d==null) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter valid numbers'))); return; }
+                final ok = await _health.writeBloodPressure(systolic: s, diastolic: d, startTime: when);
+                if (ok) {
+                  setState(() { _bpBodyPosition = pos; _bpArm = arm; });
+                  await _savePrefs();
+                  if (mounted) Navigator.pop(context);
+                  _fetchData();
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to save BP to Health Connect')));
+                }
+              }, icon: const Icon(Icons.save), label: const Text('Save to Health Connect'))),
+            ]),
+          )),
+        );
+      });
+    });
+  }
+
   Future<String?> _promptText(BuildContext context, String title, String initial) async {
     final ctl = TextEditingController(text: initial);
     return showDialog<String>(context: context, builder: (ctx){
@@ -1230,6 +1325,11 @@ class _LatestBPPageState extends State<LatestBPPage> {
     try {
       final doc = pw.Document();
       final eff = _effectiveRangeLabel(_series, _rangeStart, _rangeEnd);
+      // capture chart image if possible
+      Uint8List? chartPng;
+      final ck = _chartKeyForMode();
+      if (ck != null) chartPng = await _captureChartPng(ck);
+      final secSummary = _secondarySummaryText();
       doc.addPage(
         pw.MultiPage(
           pageFormat: PdfPageFormat.a4,
@@ -1238,21 +1338,25 @@ class _LatestBPPageState extends State<LatestBPPage> {
             final rows = <pw.TableRow>[];
             rows.add(pw.TableRow(children: [pw.Text('Date'), pw.Text('Time'), pw.Text('SBP'), pw.Text('DBP'), pw.Text('Source')]));
             final list = [..._series]..sort((a,b)=> (b.timestamp??DateTime(0)).compareTo(a.timestamp??DateTime(0)));
-            for (final e in list.take(50)) {
+            for (final e in list.take(20)) {
+              final bg = _pdfBgForBp(e);
               rows.add(pw.TableRow(children: [
-                pw.Text(_fmtDate(e.timestamp)),
-                pw.Text(_fmtTime(e.timestamp)),
-                pw.Text(e.systolic?.toStringAsFixed(0) ?? '-'),
-                pw.Text(e.diastolic?.toStringAsFixed(0) ?? '-'),
-                pw.Text(e.source ?? ''),
+                pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(_fmtDate(e.timestamp)) ),
+                pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(_fmtTime(e.timestamp)) ),
+                pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(e.systolic?.toStringAsFixed(0) ?? '-') ),
+                pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(e.diastolic?.toStringAsFixed(0) ?? '-') ),
+                pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(e.source ?? '')), 
               ]));
             }
             return [
               pw.Text('Blood Pressure Report', style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
               pw.SizedBox(height: 6),
               pw.Text(eff),
+              if (secSummary.isNotEmpty) pw.Text(secSummary, style: const pw.TextStyle(fontSize: 12, color: PdfColors.grey700)),
               pw.SizedBox(height: 12),
-              pw.Text('Recent Readings (up to 50)'),
+              if (chartPng != null) pw.Center(child: pw.Image(pw.MemoryImage(chartPng), width: 500)),
+              pw.SizedBox(height: 12),
+              pw.Text('Recent Readings (last 20)'),
               pw.Table(border: pw.TableBorder.all(color: PdfColors.grey300), children: rows),
             ];
           },
@@ -1290,6 +1394,55 @@ class _LatestBPPageState extends State<LatestBPPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Unable to open Health Connect: $e')));
     }
+  }
+
+  // ---- PDF helpers and chart capture ----
+  PdfColor _pdfBgForBp(_BPEntry e) {
+    final s = e.systolic ?? 0; final d = e.diastolic ?? 0;
+    if (s >= 180 || d >= 120) return PdfColor.fromInt(0xFFFFEBEE); // dark red tint
+    if (s >= 140 || d >= 90) return PdfColor.fromInt(0xFFFFEBEE); // red tint
+    if (s >= 130) return PdfColor.fromInt(0xFFFFF3E0); // orange tint
+    if (s >= 120) return PdfColor.fromInt(0xFFFFFDE7); // yellow tint
+    return PdfColor.fromInt(0xFFE8F5E9); // green tint
+  }
+
+  String _secondarySummaryText() {
+    if (_secondMetric == 'none') return '';
+    if (_secondMetric == 'steps') {
+      final sum = _secSeries.fold<double>(0, (a,b)=> a + b.value);
+      return 'Steps (total): ${sum.toStringAsFixed(0)}';
+    }
+    if (_secondMetric == 'sleep') {
+      final sum = _secSeries.fold<double>(0, (a,b)=> a + b.value);
+      return 'Sleep (total minutes): ${sum.toStringAsFixed(0)}';
+    }
+    if (_secSeries.isNotEmpty) {
+      final mean = _secSeries.fold<double>(0, (a,b)=> a + b.value)/_secSeries.length;
+      final label = (_secondMetric == 'resting_hr') ? 'Resting HR' : (_secondMetric == 'hr' ? 'Heart Rate' : (_secondMetric == 'hrv_sdnn' ? 'HRV SDNN' : 'HRV RMSSD'));
+      return '$label (mean): ${mean.toStringAsFixed(0)}';
+    }
+    return '';
+  }
+
+  final GlobalKey _trendChartKey = GlobalKey();
+  final GlobalKey _avgChartKey = GlobalKey();
+  final GlobalKey _compareChartKey = GlobalKey();
+
+  GlobalKey? _chartKeyForMode() {
+    if (_mode == _ViewMode.trend) return _trendChartKey;
+    if (_mode == _ViewMode.averageDay) return _avgChartKey;
+    if (_mode == _ViewMode.compare) return _compareChartKey;
+    return null;
+  }
+
+  Future<Uint8List?> _captureChartPng(GlobalKey key) async {
+    try {
+      final rb = key.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      if (rb == null) return null;
+      final img = await rb.toImage(pixelRatio: 3.0);
+      final data = await img.toByteData(format: ui.ImageByteFormat.png);
+      return data?.buffer.asUint8List();
+    } catch (_) { return null; }
   }
 }
 
