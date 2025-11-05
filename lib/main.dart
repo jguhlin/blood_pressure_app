@@ -22,6 +22,30 @@ class BPApp extends StatelessWidget {
   }
 }
 
+// Build blood pressure category background when only one metric is visible
+RangeAnnotations _zoneAnnotations({required bool showSys, required bool showDia}) {
+  if (showSys == showDia) return const RangeAnnotations();
+  final isSys = showSys && !showDia;
+  final bands = <HorizontalRangeAnnotation>[];
+  if (isSys) {
+    bands.addAll([
+      HorizontalRangeAnnotation(y1: 0, y2: 120, color: const Color(0x1128A745)), // green
+      HorizontalRangeAnnotation(y1: 120, y2: 130, color: const Color(0x11FFC107)), // yellow
+      HorizontalRangeAnnotation(y1: 130, y2: 140, color: const Color(0x11FF9800)), // orange
+      HorizontalRangeAnnotation(y1: 140, y2: 180, color: const Color(0x11F44336)), // red
+      HorizontalRangeAnnotation(y1: 180, y2: 300, color: const Color(0x11B71C1C)), // dark red
+    ]);
+  } else {
+    bands.addAll([
+      HorizontalRangeAnnotation(y1: 0, y2: 80, color: const Color(0x1128A745)),
+      HorizontalRangeAnnotation(y1: 80, y2: 90, color: const Color(0x11FFC107)),
+      HorizontalRangeAnnotation(y1: 90, y2: 120, color: const Color(0x11F44336)),
+      HorizontalRangeAnnotation(y1: 120, y2: 300, color: const Color(0x11B71C1C)),
+    ]);
+  }
+  return RangeAnnotations(horizontalRangeAnnotations: bands);
+}
+
 class LatestBPPage extends StatefulWidget {
   final bool autoFetch;
   const LatestBPPage({super.key, this.autoFetch = true});
@@ -34,6 +58,10 @@ class _LatestBPPageState extends State<LatestBPPage> {
   bool _loading = false;
   String? _error;
   bool _hasPermissions = false;
+  // Series visibility and trend style
+  bool _showSys = true;
+  bool _showDia = true;
+  bool _trendDistribution = false; // false: lines/points, true: distribution band
   _BPEntry? _latest;
   List<_BPEntry> _series = const [];
   int _listLimit = 100;
@@ -584,6 +612,15 @@ class _LatestBPPageState extends State<LatestBPPage> {
                     Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('Compare')),
                   ],
                 ),
+                if (_mode == _ViewMode.trend)
+                  ToggleButtons(
+                    isSelected: [!_trendDistribution, _trendDistribution],
+                    onPressed: (i) => setState(() => _trendDistribution = (i == 1)),
+                    children: const [
+                      Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('Lines')),
+                      Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('Distribution')),
+                    ],
+                  ),
                 Row(children: [
                   const Text('Bands'),
                   const SizedBox(width: 6),
@@ -623,14 +660,24 @@ class _LatestBPPageState extends State<LatestBPPage> {
                 ),
               ],
             ),
-            // Legend: systolic/diastolic with units or compare A/B
+            // Legend with toggles (tap to enable/disable)
             if (_mode != _ViewMode.compare)
               Wrap(
                 spacing: 8,
                 crossAxisAlignment: WrapCrossAlignment.center,
-                children: const [
-                  _LegendDot(color: Colors.red), Text('Systolic (mmHg)'),
-                  _LegendDot(color: Colors.blue), Text('Diastolic (mmHg)'),
+                children: [
+                  _LegendToggle(
+                    color: Colors.red,
+                    label: 'Systolic (mmHg)',
+                    enabled: _showSys,
+                    onTap: () => setState(() => _showSys = !_showSys),
+                  ),
+                  _LegendToggle(
+                    color: Colors.blue,
+                    label: 'Diastolic (mmHg)',
+                    enabled: _showDia,
+                    onTap: () => setState(() => _showDia = !_showDia),
+                  ),
                 ],
               )
             else
@@ -662,15 +709,26 @@ class _LatestBPPageState extends State<LatestBPPage> {
               SizedBox(
                 height: 260,
                 child: _mode == _ViewMode.trend
-                    ? _TrendChart(series: _series, start: _rangeStart, end: _rangeEnd)
+                    ? _TrendChart(
+                        series: _series,
+                        start: _rangeStart,
+                        end: _rangeEnd,
+                        showSys: _showSys,
+                        showDia: _showDia,
+                        distribution: _trendDistribution,
+                      )
                     : _AverageDayChart(
                         series: _series,
                         anchorMinute: _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null,
                         showBands: _showBands,
+                        showSys: _showSys,
+                        showDia: _showDia,
                       ),
               )
             else
               const Text('No data available for selected range.'),
+            const SizedBox(height: 6),
+            if (_mode != _ViewMode.compare) Text(_effectiveRangeLabel(_series, _rangeStart, _rangeEnd), style: const TextStyle(fontSize: 12, color: Colors.black54)),
             const SizedBox(height: 12),
             _SummaryCards(
               mode: _mode,
@@ -860,27 +918,101 @@ class _TrendChart extends StatelessWidget {
   final List<_BPEntry> series;
   final DateTime start;
   final DateTime end;
-  const _TrendChart({required this.series, required this.start, required this.end});
-
-  double _toX(DateTime t) => t.difference(start).inMinutes / 1440.0; // days as double
+  final bool showSys;
+  final bool showDia;
+  final bool distribution; // if true, show daily quantile bands
+  const _TrendChart({required this.series, required this.start, required this.end, this.showSys = true, this.showDia = true, this.distribution = false});
 
   @override
   Widget build(BuildContext context) {
+    // Effective range based on data
+    DateTime effStart = start, effEnd = end;
+    final times = series.where((e) => e.timestamp != null).map((e) => e.timestamp!).toList()..sort();
+    if (times.isNotEmpty) {
+      if (times.first.isAfter(effStart)) effStart = times.first;
+      if (times.last.isBefore(effEnd)) effEnd = times.last;
+      if (!effEnd.isAfter(effStart)) effEnd = effStart.add(const Duration(days: 1));
+    }
+    double toX(DateTime t) => t.difference(effStart).inMinutes / 1440.0;
+
     final sysSpots = <FlSpot>[];
     final diaSpots = <FlSpot>[];
     for (final e in series) {
-      if (e.timestamp == null) continue;
-      final x = _toX(e.timestamp!);
-      if (e.systolic != null) sysSpots.add(FlSpot(x, e.systolic!));
-      if (e.diastolic != null) diaSpots.add(FlSpot(x, e.diastolic!));
+      final t = e.timestamp; if (t == null) continue;
+      final x = toX(t);
+      if (showSys && e.systolic != null) sysSpots.add(FlSpot(x, e.systolic!));
+      if (showDia && e.diastolic != null) diaSpots.add(FlSpot(x, e.diastolic!));
     }
-    final maxX = end.difference(start).inDays.toDouble().clamp(1.0, 365.0);
+    final maxX = effEnd.difference(effStart).inDays.toDouble().clamp(1.0, 365.0);
+
+    // Distribution mode: per-day quantiles
+    List<FlSpot> q50Sys = [], q25Sys = [], q75Sys = [];
+    List<FlSpot> q50Dia = [], q25Dia = [], q75Dia = [];
+    if (distribution) {
+      final byDay = <DateTime, List<_BPEntry>>{};
+      for (final e in series) {
+        if (e.timestamp == null) continue;
+        final day = DateTime(e.timestamp!.year, e.timestamp!.month, e.timestamp!.day);
+        (byDay[day] ??= []).add(e);
+      }
+      final days = byDay.keys.toList()..sort();
+      for (final d in days) {
+        final xs = toX(d);
+        if (showSys) {
+          final vals = byDay[d]!.where((e) => e.systolic != null).map((e) => e.systolic!).toList()..sort();
+          if (vals.isNotEmpty) {
+            q50Sys.add(FlSpot(xs, _q(vals, 0.5)));
+            q25Sys.add(FlSpot(xs, _q(vals, 0.25)));
+            q75Sys.add(FlSpot(xs, _q(vals, 0.75)));
+          }
+        }
+        if (showDia) {
+          final vals = byDay[d]!.where((e) => e.diastolic != null).map((e) => e.diastolic!).toList()..sort();
+          if (vals.isNotEmpty) {
+            q50Dia.add(FlSpot(xs, _q(vals, 0.5)));
+            q25Dia.add(FlSpot(xs, _q(vals, 0.25)));
+            q75Dia.add(FlSpot(xs, _q(vals, 0.75)));
+          }
+        }
+      }
+    }
+
+    double minY = 200, maxY = 40;
+    void acc(List<FlSpot> s) { for (final p in s) { if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y; } }
+    if (!distribution) { acc(sysSpots); acc(diaSpots); } else { acc(q25Sys); acc(q75Sys); acc(q25Dia); acc(q75Dia); acc(q50Sys); acc(q50Dia); }
+    if (minY > maxY) { minY = 40; maxY = 200; }
+    const pad = 10.0;
+    minY = (minY - pad).clamp(40.0, 300.0);
+    maxY = (maxY + pad).clamp(60.0, 300.0);
+
+    final bars = <LineChartBarData>[];
+    final between = <BetweenBarsData>[];
+    if (!distribution) {
+      if (showSys) bars.add(LineChartBarData(spots: sysSpots, isCurved: true, curveSmoothness: 0.15, color: Colors.red, barWidth: 2, dotData: const FlDotData(show: false)));
+      if (showDia) bars.add(LineChartBarData(spots: diaSpots, isCurved: true, curveSmoothness: 0.15, color: Colors.blue, barWidth: 2, dotData: const FlDotData(show: false)));
+    } else {
+      if (showSys) {
+        final base = bars.length;
+        bars.add(LineChartBarData(spots: q25Sys, isCurved: true, color: Colors.transparent, barWidth: 0, dotData: const FlDotData(show: false)));
+        bars.add(LineChartBarData(spots: q75Sys, isCurved: true, color: Colors.transparent, barWidth: 0, dotData: const FlDotData(show: false)));
+        between.add(BetweenBarsData(fromIndex: base, toIndex: base + 1, color: const Color(0x26F44336)));
+        bars.add(LineChartBarData(spots: q50Sys, isCurved: true, color: Colors.red, barWidth: 2, dotData: const FlDotData(show: false)));
+      }
+      if (showDia) {
+        final base = bars.length;
+        bars.add(LineChartBarData(spots: q25Dia, isCurved: true, color: Colors.transparent, barWidth: 0, dotData: const FlDotData(show: false)));
+        bars.add(LineChartBarData(spots: q75Dia, isCurved: true, color: Colors.transparent, barWidth: 0, dotData: const FlDotData(show: false)));
+        between.add(BetweenBarsData(fromIndex: base, toIndex: base + 1, color: const Color(0x1F2196F3)));
+        bars.add(LineChartBarData(spots: q50Dia, isCurved: true, color: Colors.blue, barWidth: 2, dotData: const FlDotData(show: false)));
+      }
+    }
+
     return LineChart(
       LineChartData(
         minX: 0,
         maxX: maxX,
-        minY: 40,
-        maxY: 200,
+        minY: minY,
+        maxY: maxY,
         gridData: const FlGridData(show: true, drawVerticalLine: true),
         titlesData: FlTitlesData(
           leftTitles: AxisTitles(
@@ -893,11 +1025,8 @@ class _TrendChart extends StatelessWidget {
               showTitles: true,
               interval: (maxX / 5).clamp(1, 30),
               getTitlesWidget: (value, meta) {
-                final d = start.add(Duration(days: value.round()));
-                return SideTitleWidget(
-                  meta: meta,
-                  child: Text('${d.month}/${d.day}'),
-                );
+                final d = effStart.add(Duration(days: value.round()));
+                return SideTitleWidget(meta: meta, child: Text('${d.month}/${d.day}'));
               },
             ),
             axisNameWidget: const Text('Date'),
@@ -906,38 +1035,9 @@ class _TrendChart extends StatelessWidget {
           topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
           rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         ),
-        lineBarsData: [
-          LineChartBarData(
-            spots: sysSpots,
-            isCurved: true,
-            curveSmoothness: 0.15,
-            color: Colors.red,
-            barWidth: 2,
-            dotData: const FlDotData(show: false),
-          ),
-          LineChartBarData(
-            spots: diaSpots,
-            isCurved: true,
-            curveSmoothness: 0.15,
-            color: Colors.blue,
-            barWidth: 2,
-            dotData: const FlDotData(show: false),
-          ),
-        ],
-        lineTouchData: LineTouchData(
-          enabled: true,
-          touchTooltipData: LineTouchTooltipData(
-            getTooltipItems: (spots) {
-              return spots.map((barSpot) {
-                final days = barSpot.x;
-                final dt = start.add(Duration(days: days.round()));
-                final value = barSpot.y;
-                final label = '${dt.month}/${dt.day}  •  ${value.toStringAsFixed(0)} mmHg';
-                return LineTooltipItem(label, TextStyle(color: barSpot.bar.color ?? Colors.black));
-              }).toList();
-            },
-          ),
-        ),
+        lineBarsData: bars,
+        betweenBarsData: between,
+        lineTouchData: const LineTouchData(enabled: true),
         borderData: FlBorderData(
           show: true,
           border: const Border(
@@ -947,8 +1047,18 @@ class _TrendChart extends StatelessWidget {
             top: BorderSide(color: Colors.transparent),
           ),
         ),
+        rangeAnnotations: _zoneAnnotations(showSys: showSys, showDia: showDia),
       ),
     );
+  }
+
+  static double _q(List<double> sorted, double q) {
+    if (sorted.isEmpty) return double.nan;
+    final pos = (sorted.length - 1) * q;
+    final i = pos.floor();
+    final frac = pos - i;
+    if (i + 1 < sorted.length) return sorted[i] * (1 - frac) + sorted[i + 1] * frac;
+    return sorted[i];
   }
 }
 
@@ -956,7 +1066,9 @@ class _AverageDayChart extends StatelessWidget {
   final List<_BPEntry> series;
   final int? anchorMinute; // minutes since midnight
   final bool showBands;
-  const _AverageDayChart({required this.series, this.anchorMinute, this.showBands = false});
+  final bool showSys;
+  final bool showDia;
+  const _AverageDayChart({required this.series, this.anchorMinute, this.showBands = false, this.showSys = true, this.showDia = true});
 
   @override
   Widget build(BuildContext context) {
@@ -1002,29 +1114,33 @@ class _AverageDayChart extends StatelessWidget {
         LineChartBarData(spots: diaUpper, isCurved: true, color: Colors.transparent, barWidth: 0, dotData: const FlDotData(show: false)),
       ]);
     }
-    bars.add(LineChartBarData(
-      spots: sysSpots,
-      isCurved: true,
-      curveSmoothness: 0.25,
-      color: Colors.red,
-      barWidth: 2,
-      dotData: const FlDotData(show: false),
-    ));
-    bars.add(LineChartBarData(
-      spots: diaSpots,
-      isCurved: true,
-      curveSmoothness: 0.25,
-      color: Colors.blue,
-      barWidth: 2,
-      dotData: const FlDotData(show: false),
-    ));
+    if (showSys) {
+      bars.add(LineChartBarData(
+        spots: sysSpots,
+        isCurved: true,
+        curveSmoothness: 0.25,
+        color: Colors.red,
+        barWidth: 2,
+        dotData: const FlDotData(show: false),
+      ));
+    }
+    if (showDia) {
+      bars.add(LineChartBarData(
+        spots: diaSpots,
+        isCurved: true,
+        curveSmoothness: 0.25,
+        color: Colors.blue,
+        barWidth: 2,
+        dotData: const FlDotData(show: false),
+      ));
+    }
 
     return LineChart(
       LineChartData(
         minX: 0,
         maxX: 24,
-        minY: 40,
-        maxY: 200,
+        minY: _autoMinY([if (showSys) sysSpots, if (showDia) diaSpots]) - 10,
+        maxY: _autoMaxY([if (showSys) sysSpots, if (showDia) diaSpots]) + 10,
         gridData: const FlGridData(show: true, drawVerticalLine: true),
         titlesData: FlTitlesData(
           leftTitles: AxisTitles(
@@ -1062,8 +1178,26 @@ class _AverageDayChart extends StatelessWidget {
             top: BorderSide(color: Colors.transparent),
           ),
         ),
+        rangeAnnotations: _zoneAnnotations(showSys: showSys, showDia: showDia),
       ),
     );
+  }
+
+  double _autoMinY(List<List<FlSpot>> lists) {
+    double m = 300;
+    for (final l in lists) {
+      for (final p in l) { if (p.y < m) m = p.y; }
+    }
+    if (m == 300) m = 40;
+    return m.clamp(40.0, 300.0);
+  }
+  double _autoMaxY(List<List<FlSpot>> lists) {
+    double m = 0;
+    for (final l in lists) {
+      for (final p in l) { if (p.y > m) m = p.y; }
+    }
+    if (m == 0) m = 200;
+    return m.clamp(60.0, 300.0);
   }
 }
 
@@ -1365,6 +1499,35 @@ class _LegendDot extends StatelessWidget {
   }
 }
 
+class _LegendToggle extends StatelessWidget {
+  final Color color;
+  final String label;
+  final bool enabled;
+  final VoidCallback onTap;
+  const _LegendToggle({required this.color, required this.label, required this.enabled, required this.onTap});
+  @override
+  Widget build(BuildContext context) {
+    int to255(double v) => (v * 255.0).round().clamp(0, 255);
+    final c = enabled
+        ? color
+        : Color.fromARGB(
+            to255(0.3),
+            to255(color.r),
+            to255(color.g),
+            to255(color.b),
+          );
+    final t = enabled ? null : Colors.black45;
+    return InkWell(
+      onTap: onTap,
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(width: 12, height: 12, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
+        const SizedBox(width: 6),
+        Text(label, style: TextStyle(color: t)),
+      ]),
+    );
+  }
+}
+
 class _SummaryCards extends StatelessWidget {
   final _ViewMode mode;
   final List<_BPEntry> series;
@@ -1598,4 +1761,16 @@ class _ReadingsSection extends StatelessWidget {
     String two(int n) => n.toString().padLeft(2, '0');
     return '${two(d.hour)}:${two(d.minute)}';
   }
+}
+
+String _effectiveRangeLabel(List<_BPEntry> entries, DateTime start, DateTime end) {
+  final ts = entries.where((e) => e.timestamp != null).map((e) => e.timestamp!).toList()..sort();
+  if (ts.isEmpty) {
+    return 'Effective: —';
+  }
+  final effStart = ts.first.isAfter(start) ? ts.first : start;
+  final effEnd = ts.last.isBefore(end) ? ts.last : end;
+  final daysWithReadings = ts.map((t) => DateTime(t.year, t.month, t.day)).toSet().length;
+  String fmt(DateTime d) => '${d.year}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')}';
+  return 'Effective: ${fmt(effStart)} — ${fmt(effEnd)}  •  $daysWithReadings day(s) with readings';
 }
