@@ -75,6 +75,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
   _BPEntry? _latest;
   List<_BPEntry> _series = const [];
   List<_SecPoint> _secSeries = const [];
+  List<_SecSample> _secSamples = const [];
   int _listLimit = 100;
   bool _listLoadingMore = false;
   int _rangeDays = 30;
@@ -233,6 +234,9 @@ class _LatestBPPageState extends State<LatestBPPage> {
       List<_SecPoint> sec = const [];
       if (_secondMetric != 'none') {
         sec = await _fetchSecondary(_rangeStart, _rangeEnd);
+        _secSamples = await _fetchSecondarySeries(_rangeStart, _rangeEnd);
+      } else {
+        _secSamples = const [];
       }
       final latest = series.isNotEmpty ? series.last : null;
       setState(() {
@@ -277,6 +281,27 @@ class _LatestBPPageState extends State<LatestBPPage> {
     } catch (_) {
       return const [];
     }
+  }
+
+  Future<List<_SecSample>> _fetchSecondarySeries(DateTime start, DateTime end) async {
+    HealthDataType? t;
+    switch (_secondMetric) {
+      case 'resting_hr': t = HealthDataType.RESTING_HEART_RATE; break;
+      case 'steps': t = HealthDataType.STEPS; break;
+      case 'sleep': t = HealthDataType.SLEEP_ASLEEP; break;
+      default: return const [];
+    }
+    try {
+      final pts = await _health.getHealthDataFromTypes(types: [t], startTime: start, endTime: end);
+      final out = <_SecSample>[];
+      for (final p in pts) {
+        final v = _toDouble(p.value);
+        if (v == null) continue;
+        out.add(_SecSample(t: p.dateTo, v: v));
+      }
+      out.sort((a,b)=>a.t.compareTo(b.t));
+      return out;
+    } catch (_) { return const []; }
   }
 
   Future<bool> _ensurePermissions() async {
@@ -932,6 +957,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
                         showBands: _showBands,
                         showSys: _showSys,
                         showDia: _showDia,
+                        secondarySamples: (_secondMetric == 'resting_hr') ? _secSamples : const [],
+                        secondaryLabel: _secondMetric,
                       ),
               )
             else
@@ -985,6 +1012,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
         final titleCtl = TextEditingController();
         DateTime newEventDate = DateTime.now();
         return StatefulBuilder(builder: (context, setSt) {
+          String q = '';
           Future<void> pickDate() async {
             final picked = await showDatePicker(context: context, firstDate: DateTime(2000), lastDate: DateTime.now().add(const Duration(days: 365)), initialDate: newEventDate);
             if (picked != null) setSt(()=> newEventDate = picked);
@@ -1024,7 +1052,12 @@ class _LatestBPPageState extends State<LatestBPPage> {
                     ElevatedButton.icon(onPressed: () async { if(titleCtl.text.trim().isEmpty) return; await _addEvent(titleCtl.text.trim(), newEventDate); titleCtl.clear(); setSt((){}); }, icon: const Icon(Icons.add), label: const Text('Add')),
                   ]),
                   const SizedBox(height: 12),
-                  SizedBox(height: 220, child: ListView.separated(itemBuilder: (_,i){ final e = _events[i]; return ListTile(
+                  TextField(
+                    decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Filter events', border: OutlineInputBorder()),
+                    onChanged: (v){ setSt(()=> q = v.trim().toLowerCase()); },
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(height: 220, child: ListView.separated(itemBuilder: (_,i){ final list = _events.where((e)=> q.isEmpty || e.title.toLowerCase().contains(q)).toList(); if (i>=list.length) return const SizedBox.shrink(); final e = list[i]; return ListTile(
                     title: Text('${e.title} — ${e.date.year}-${e.date.month.toString().padLeft(2,'0')}-${e.date.day.toString().padLeft(2,'0')}'),
                     trailing: Wrap(spacing:6, children: [
                       OutlinedButton(onPressed: (){ _setRangeFromEvent(e); }, child: const Text('Set Range')),
@@ -1036,7 +1069,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
                       }, icon: const Icon(Icons.edit)),
                       IconButton(onPressed: (){ _deleteEvent(e.id); setSt((){}); }, icon: const Icon(Icons.delete)),
                     ]),
-                  ); }, separatorBuilder: (_, __)=> const Divider(height:1), itemCount: _events.length)),
+                  ); }, separatorBuilder: (_, __)=> const Divider(height:1), itemCount: _events.where((e)=> q.isEmpty || e.title.toLowerCase().contains(q)).length)),
                   const SizedBox(height: 12),
                 ]),
               ),
@@ -1083,6 +1116,11 @@ class _LatestBPPageState extends State<LatestBPPage> {
               Text('• Background color bands appear when only one metric is enabled.'),
               Text('• SBP: <120 green, 120–129 yellow, 130–139 orange, 140–179 red, 180+ dark red.'),
               Text('• DBP: <80 green, 80–89 yellow, 90–119 red, 120+ dark red.'),
+              SizedBox(height: 12),
+              Text('Secondary Axis'),
+              SizedBox(height: 8),
+              Text('• Trend: Resting HR, Steps, Sleep supported (right axis).'),
+              Text('• Average Day: Resting HR supported (right axis) for now.'),
             ]),
           ),
         ),
@@ -1307,6 +1345,12 @@ class _SecPoint {
   final DateTime date;
   final double value;
   const _SecPoint({required this.date, required this.value});
+}
+
+class _SecSample {
+  final DateTime t;
+  final double v;
+  const _SecSample({required this.t, required this.v});
 }
 
 class _TrendChart extends StatelessWidget {
@@ -1662,7 +1706,9 @@ class _AverageDayChart extends StatelessWidget {
   final bool showBands;
   final bool showSys;
   final bool showDia;
-  const _AverageDayChart({required this.series, this.anchorMinute, this.showBands = false, this.showSys = true, this.showDia = true});
+  final List<_SecSample> secondarySamples;
+  final String secondaryLabel;
+  const _AverageDayChart({required this.series, this.anchorMinute, this.showBands = false, this.showSys = true, this.showDia = true, this.secondarySamples = const [], this.secondaryLabel = ''});
 
   @override
   Widget build(BuildContext context) {
@@ -1729,12 +1775,44 @@ class _AverageDayChart extends StatelessWidget {
       ));
     }
 
+    // Secondary time-of-day aggregation (e.g., Resting HR)
+    List<FlSpot> secSpots = [];
+    double? secMin, secMax;
+    if (secondarySamples.isNotEmpty) {
+      final bins = List.generate(agg.minutes.length, (_) => <double>[]);
+      for (final s in secondarySamples) {
+        var m = s.t.hour * 60 + s.t.minute + s.t.second/60.0;
+        if (anchorMinute != null) { m = (m - anchorMinute!) % 1440; if (m < 0) m += 1440; }
+        final idx = (m / 15).floor().clamp(0, agg.minutes.length - 1);
+        bins[idx].add(s.v);
+      }
+      final secMeans = <double?>[];
+      for (final b in bins) {
+        if (b.isEmpty) { secMeans.add(null); } else { secMeans.add(b.reduce((a,b)=>a+b)/b.length); }
+      }
+      // map to chart coordinates with right-axis mapping
+      final ys = <double>[];
+      for (final v in secMeans) { if (v != null) ys.add(v); }
+      if (ys.isNotEmpty) { secMin = ys.reduce(math.min); secMax = ys.reduce(math.max); }
+      final leftMin = _autoMinY([if (showSys) sysSpots, if (showDia) diaSpots]);
+      final leftMax = _autoMaxY([if (showSys) sysSpots, if (showDia) diaSpots]);
+      final leftRange = (leftMax - leftMin).abs() < 1e-6 ? 1.0 : (leftMax - leftMin);
+      final secRange = (secMax != null && secMin != null && (secMax - secMin).abs() >= 1e-6) ? (secMax - secMin) : 1.0;
+      for (int i = 0; i < secMeans.length; i++) {
+        final v = secMeans[i];
+        if (v == null) continue;
+        final x = agg.minutes[i] / 60.0;
+        final y = leftMin + (v - (secMin ?? 0)) * leftRange / secRange;
+        secSpots.add(FlSpot(x, y));
+      }
+    }
+
     return LineChart(
       LineChartData(
         minX: 0,
         maxX: 24,
-        minY: _autoMinY([if (showSys) sysSpots, if (showDia) diaSpots]) - 10,
-        maxY: _autoMaxY([if (showSys) sysSpots, if (showDia) diaSpots]) + 10,
+        minY: _autoMinY([if (showSys) sysSpots, if (showDia) diaSpots, secSpots.isNotEmpty ? secSpots : <FlSpot>[]]) - 10,
+        maxY: _autoMaxY([if (showSys) sysSpots, if (showDia) diaSpots, secSpots.isNotEmpty ? secSpots : <FlSpot>[]]) + 10,
         gridData: const FlGridData(show: true, drawVerticalLine: true),
         titlesData: FlTitlesData(
           leftTitles: AxisTitles(
@@ -1756,7 +1834,10 @@ class _AverageDayChart extends StatelessWidget {
           topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
           rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         ),
-        lineBarsData: bars,
+        lineBarsData: [
+          ...bars,
+          if (secSpots.isNotEmpty) LineChartBarData(spots: secSpots, isCurved: true, color: Colors.purple, barWidth: 2, dotData: const FlDotData(show: false)),
+        ],
         betweenBarsData: [
           if (showBands && sysLower.isNotEmpty && sysUpper.isNotEmpty)
             BetweenBarsData(fromIndex: 0, toIndex: 1, color: const Color(0x26F44336)),
