@@ -18,6 +18,7 @@ import 'models/event.dart' as mdl;
 import 'widgets/advanced_settings_sheet.dart';
 import 'widgets/add_bp_sheet.dart';
 import 'widgets/trend_chart.dart';
+import 'widgets/chart_utils.dart' as cu;
 import 'widgets/average_day_chart.dart';
 import 'widgets/average_day_compare_chart.dart';
 
@@ -63,6 +64,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
   bool _trendSmoothAuto = true; // tie window to range length
   String _secondMetric =
       'none'; // 'none','hr','resting_hr','hrv_sdnn','hrv_rmssd','steps','sleep','energy','workouts'
+  String _bpZoneScheme = 'acc_aha'; // 'acc_aha' (US) or 'esc_esh' (EU)
   // Surge heuristic settings (flexible)
   int _surgeMorningWindowHours = 2; // [wake, wake+X]
   int _surgeTroughWindowHours = 6; // [wake-X, wake)
@@ -72,7 +74,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
   int _surgeWakeEarliestHour = 3; // earliest wake search hour
   int _surgeWakeLatestHour = 11; // latest wake search hour
   // Add-reading: no local health details stored
-  _BPEntry? _latest;
+  // _latest removed (no Latest block shown; rely on Recent Readings)
   List<_BPEntry> _series = const [];
   List<cm.ChartSecPoint> _secSeries = const [];
   List<cm.ChartSecSample> _secSamples = const [];
@@ -127,6 +129,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
     _trendDistribution =
         prefs.getBool('trend_distribution') ?? _trendDistribution;
     _secondMetric = prefs.getString('second_metric') ?? _secondMetric;
+    _bpZoneScheme = prefs.getString('bp_zone_scheme') ?? _bpZoneScheme;
     _pdfIncludeBothCharts =
         prefs.getBool('pdf_include_both_charts') ?? _pdfIncludeBothCharts;
     _surgeMorningWindowHours =
@@ -196,6 +199,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
     await prefs.setBool('trend_tooltips', _trendTooltips);
     await prefs.setBool('trend_distribution', _trendDistribution);
     await prefs.setString('second_metric', _secondMetric);
+    await prefs.setString('bp_zone_scheme', _bpZoneScheme);
     await prefs.setBool('pdf_include_both_charts', _pdfIncludeBothCharts);
     await _saveEvents(prefs);
     await prefs.setInt('surge_morning_window_h', _surgeMorningWindowHours);
@@ -264,14 +268,18 @@ class _LatestBPPageState extends State<LatestBPPage> {
       // Secondary metric
       List<cm.ChartSecPoint> sec = const [];
       if (_secondMetric != 'none') {
-        sec = await _fetchSecondary(_rangeStart, _rangeEnd);
-        _secSamples = await _fetchSecondarySeries(_rangeStart, _rangeEnd);
+        final okSec = await _ensureSecondaryPermissions();
+        if (okSec) {
+          sec = await _fetchSecondary(_rangeStart, _rangeEnd);
+          _secSamples = await _fetchSecondarySeries(_rangeStart, _rangeEnd);
+        } else {
+          _secSamples = const [];
+          sec = const [];
+        }
       } else {
         _secSamples = const [];
       }
-      final latest = series.isNotEmpty ? series.last : null;
       setState(() {
-        _latest = latest;
         _series = series;
         _secSeries = sec;
         _loading = false;
@@ -1134,30 +1142,41 @@ class _LatestBPPageState extends State<LatestBPPage> {
                     ],
                   ),
                 if (_mode == _ViewMode.trend && _trendDistribution)
-                  Row(
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 12,
+                    runSpacing: 4,
                     children: [
-                      const Text('Tooltips'),
-                      const SizedBox(width: 6),
-                      Switch(
-                        value: _trendTooltips,
-                        onChanged: (v) {
-                          setState(() => _trendTooltips = v);
-                          _savePrefs();
-                        },
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text('Tooltips'),
+                          const SizedBox(width: 6),
+                          Switch(
+                            value: _trendTooltips,
+                            onChanged: (v) {
+                              setState(() => _trendTooltips = v);
+                              _savePrefs();
+                            },
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 12),
-                      const Text('Smoothing'),
-                      const SizedBox(width: 6),
-                      Switch(
-                        value: _trendSmoothing,
-                        onChanged: (v) {
-                          setState(() => _trendSmoothing = v);
-                          _savePrefs();
-                        },
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text('Smoothing'),
+                          const SizedBox(width: 6),
+                          Switch(
+                            value: _trendSmoothing,
+                            onChanged: (v) {
+                              setState(() => _trendSmoothing = v);
+                              _savePrefs();
+                            },
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 8),
                       SizedBox(
-                        width: 180,
+                        width: 240,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -1394,6 +1413,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
                             smoothingMethod: _trendSmoothMethod,
                             secondary: _secSeries,
                             secondaryLabel: _secondMetric,
+                            showBands: _showBands,
+                            zoneScheme: _bpZoneScheme,
                           ),
                         ),
                       ),
@@ -1425,6 +1446,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
                               smoothingMethod: _trendSmoothMethod,
                               secondary: _secSeries,
                               secondaryLabel: _secondMetric,
+                              showBands: _showBands,
+                              zoneScheme: _bpZoneScheme,
                             )
                           : AverageDayChart(
                               series: _series
@@ -1483,6 +1506,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
               entriesB: _seriesB,
               limit: _listLimit,
               loading: _listLoadingMore,
+              zoneScheme: _bpZoneScheme,
               onLoadMore: _mode == _ViewMode.compare
                   ? _loadMoreReadingsCompare
                   : _loadMoreReadings,
@@ -1490,13 +1514,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
             const SizedBox(height: 16),
             if (_error != null)
               Text(_error!, style: const TextStyle(color: Colors.red)),
-            const Text(
-              'Latest entry (if available):',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            _LatestTable(entry: _latest),
-            const SizedBox(height: 12),
+            // Removed Latest entry block; Recent Readings below covers this
             const Text(
               'Note: Health Connect access may initially show recent data only. '
               'If no result appears, try granting history access when prompted.',
@@ -1616,6 +1634,11 @@ class _LatestBPPageState extends State<LatestBPPage> {
           },
           onDoseTimeChanged: (t) {
             setState(() => _doseTime = t);
+            _savePrefs();
+          },
+          zoneScheme: _bpZoneScheme,
+          onZoneScheme: (s) {
+            setState(() => _bpZoneScheme = s);
             _savePrefs();
           },
           events: _events
@@ -1802,6 +1825,50 @@ class _LatestBPPageState extends State<LatestBPPage> {
       HealthDataAccess.WRITE,
       HealthDataAccess.WRITE,
     ];
+    final hasPerm =
+        await _health.hasPermissions(types, permissions: permissions) ?? false;
+    if (!hasPerm) {
+      final granted = await _health.requestAuthorization(
+        types,
+        permissions: permissions,
+      );
+      if (!granted) return false;
+    }
+    return true;
+  }
+
+  Future<bool> _ensureSecondaryPermissions() async {
+    await _health.configure();
+    final types = <HealthDataType>[];
+    switch (_secondMetric) {
+      case 'hr':
+        types.add(HealthDataType.HEART_RATE);
+        break;
+      case 'resting_hr':
+        types.add(HealthDataType.RESTING_HEART_RATE);
+        break;
+      case 'hrv_sdnn':
+        types.add(HealthDataType.HEART_RATE_VARIABILITY_SDNN);
+        break;
+      case 'hrv_rmssd':
+        types.add(HealthDataType.HEART_RATE_VARIABILITY_RMSSD);
+        break;
+      case 'steps':
+        types.add(HealthDataType.STEPS);
+        break;
+      case 'sleep':
+        types.add(HealthDataType.SLEEP_ASLEEP);
+        break;
+      case 'energy':
+        types.add(HealthDataType.ACTIVE_ENERGY_BURNED);
+        break;
+      case 'workouts':
+        types.addAll([HealthDataType.EXERCISE_TIME, HealthDataType.WORKOUT]);
+        break;
+      default:
+        return true;
+    }
+    final permissions = List.filled(types.length, HealthDataAccess.READ);
     final hasPerm =
         await _health.hasPermissions(types, permissions: permissions) ?? false;
     if (!hasPerm) {
@@ -2682,50 +2749,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
   }
 }
 
-class _LatestTable extends StatelessWidget {
-  final _BPEntry? entry;
-  const _LatestTable({required this.entry});
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('Date')),
-          DataColumn(label: Text('Time')),
-          DataColumn(label: Text('Systolic (mmHg)')),
-          DataColumn(label: Text('Diastolic (mmHg)')),
-          DataColumn(label: Text('Source')),
-        ],
-        rows: [
-          DataRow(
-            cells: [
-              DataCell(Text(_formatDate(entry?.timestamp))),
-              DataCell(Text(_formatTime(entry?.timestamp))),
-              DataCell(Text(entry?.systolic?.toStringAsFixed(0) ?? '-')),
-              DataCell(Text(entry?.diastolic?.toStringAsFixed(0) ?? '-')),
-              DataCell(Text(entry?.source ?? '-')),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _formatDate(DateTime? t) {
-    if (t == null) return '-';
-    final d = t.toLocal();
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${d.year}-${two(d.month)}-${two(d.day)}';
-  }
-
-  String _formatTime(DateTime? t) {
-    if (t == null) return '-';
-    final d = t.toLocal();
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${two(d.hour)}:${two(d.minute)}';
-  }
-}
+// _LatestTable removed
 
 // _NumField removed (now provided within AdvancedSettingsSheet)
 
@@ -4023,6 +4047,7 @@ class _ReadingsSection extends StatelessWidget {
   final int limit;
   final bool loading;
   final Future<void> Function() onLoadMore;
+  final String zoneScheme;
 
   const _ReadingsSection({
     required this.mode,
@@ -4030,6 +4055,7 @@ class _ReadingsSection extends StatelessWidget {
     required this.limit,
     required this.loading,
     required this.onLoadMore,
+    required this.zoneScheme,
     this.entriesA,
     this.entriesB,
   });
@@ -4088,6 +4114,25 @@ class _ReadingsSection extends StatelessWidget {
           (b.timestamp ?? DateTime(0)).compareTo(a.timestamp ?? DateTime(0)),
     );
     final shown = list.take(limit).toList();
+    // Assign alternating background color per day
+    final Map<DateTime, Color> dayColor = {};
+    final palette = <Color>[
+      const Color(0xFFFAFAFA),
+      const Color(0xFFF3F7FF),
+      const Color(0xFFF7FFF3),
+      const Color(0xFFFFF7F3),
+      const Color(0xFFFFF3F7),
+    ];
+    int colorIdx = 0;
+    Color colorFor(DateTime d) {
+      final key = DateTime(d.year, d.month, d.day);
+      return dayColor.putIfAbsent(key, () {
+        final c = palette[colorIdx % palette.length];
+        colorIdx++;
+        return c;
+      });
+    }
+
     return Container(
       constraints: const BoxConstraints(maxHeight: 360),
       decoration: BoxDecoration(
@@ -4098,13 +4143,48 @@ class _ReadingsSection extends StatelessWidget {
         itemCount: shown.length,
         itemBuilder: (context, i) {
           final e = shown[i];
+          final dt = e.timestamp?.toLocal();
+          final tileBg = dt != null ? colorFor(dt) : Colors.white;
+          final sysColor = cu.colorForSbp(e.systolic, scheme: zoneScheme);
+          final diaColor = cu.colorForDbp(e.diastolic, scheme: zoneScheme);
           return ListTile(
             dense: true,
-            title: Text(_fmtDate(e.timestamp)),
+            tileColor: tileBg,
+            title: Text(_friendlyDate(e.timestamp)),
             subtitle: Text(_fmtTime(e.timestamp)),
-            trailing: Text(
-              _bpText(e),
-              style: const TextStyle(fontWeight: FontWeight.w600),
+            trailing: RichText(
+              text: TextSpan(
+                children: [
+                  TextSpan(
+                    text: e.systolic != null
+                        ? e.systolic!.toStringAsFixed(0)
+                        : '-',
+                    style: TextStyle(
+                      color: sysColor,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const TextSpan(
+                    text: ' / ',
+                    style: TextStyle(color: Colors.black87),
+                  ),
+                  TextSpan(
+                    text: e.diastolic != null
+                        ? e.diastolic!.toStringAsFixed(0)
+                        : '-',
+                    style: TextStyle(
+                      color: diaColor,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const TextSpan(
+                    text: ' mmHg',
+                    style: TextStyle(color: Colors.black54),
+                  ),
+                ],
+              ),
             ),
           );
         },
@@ -4113,17 +4193,29 @@ class _ReadingsSection extends StatelessWidget {
     );
   }
 
-  String _bpText(_BPEntry e) {
-    final s = e.systolic != null ? e.systolic!.toStringAsFixed(0) : '-';
-    final d = e.diastolic != null ? e.diastolic!.toStringAsFixed(0) : '-';
-    return '$s / $d mmHg';
-  }
+  // helpers removed (unused after friendly formatting change)
 
-  String _fmtDate(DateTime? t) {
+  String _friendlyDate(DateTime? t) {
     if (t == null) return '-';
     final d = t.toLocal();
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${d.year}-${two(d.month)}-${two(d.day)}';
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    final now = DateTime.now();
+    final sameYear = d.year == now.year;
+    final label = '${d.day} ${months[d.month - 1]}';
+    return sameYear ? label : '$label ${d.year}';
   }
 
   String _fmtTime(DateTime? t) {

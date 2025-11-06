@@ -281,20 +281,8 @@ class AverageDayChart extends StatelessWidget {
       }
     }
 
-    final minY =
-        _autoMinY([
-          if (showSys) sysSpots,
-          if (showDia) diaSpots,
-          secSpots.isNotEmpty ? secSpots : <FlSpot>[],
-        ]) -
-        10;
-    final maxY =
-        _autoMaxY([
-          if (showSys) sysSpots,
-          if (showDia) diaSpots,
-          secSpots.isNotEmpty ? secSpots : <FlSpot>[],
-        ]) +
-        10;
+    final minY = _autoMinY([if (showSys) sysSpots, if (showDia) diaSpots]) - 10;
+    final maxY = _autoMaxY([if (showSys) sysSpots, if (showDia) diaSpots]) + 10;
 
     final chart = LineChart(
       LineChartData(
@@ -364,6 +352,7 @@ class AverageDayChart extends StatelessWidget {
         rangeAnnotations: cu.zoneAnnotations(
           showSys: showSys,
           showDia: showDia,
+          enabled: false,
         ),
       ),
     );

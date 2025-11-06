@@ -17,6 +17,8 @@ class TrendChart extends StatelessWidget {
   final int smoothingWindowDays;
   final List<ChartSecPoint> secondary;
   final String secondaryLabel;
+  final bool showBands; // BP zone backgrounds
+  final String zoneScheme; // 'acc_aha' or 'esc_esh'
   const TrendChart({
     super.key,
     required this.series,
@@ -31,6 +33,8 @@ class TrendChart extends StatelessWidget {
     this.smoothingWindowDays = 7,
     this.secondary = const [],
     this.secondaryLabel = '',
+    this.showBands = false,
+    this.zoneScheme = 'acc_aha',
   });
 
   @override
@@ -274,6 +278,29 @@ class TrendChart extends StatelessWidget {
         );
       }
     } else {
+      // In distribution mode, also overlay raw readings as faint dots
+      if (showSys && sysSpots.isNotEmpty) {
+        lines.add(
+          LineChartBarData(
+            spots: sysSpots,
+            isCurved: false,
+            color: Colors.red.withValues(alpha: 0.25),
+            barWidth: 0,
+            dotData: const FlDotData(show: true),
+          ),
+        );
+      }
+      if (showDia && diaSpots.isNotEmpty) {
+        lines.add(
+          LineChartBarData(
+            spots: diaSpots,
+            isCurved: false,
+            color: Colors.blue.withValues(alpha: 0.25),
+            barWidth: 0,
+            dotData: const FlDotData(show: true),
+          ),
+        );
+      }
       if (showSys) {
         lines.add(
           LineChartBarData(
@@ -376,16 +403,9 @@ class TrendChart extends StatelessWidget {
       }
     }
 
-    final minY = _autoMinY([
-      if (showSys) sysSpots,
-      if (showDia) diaSpots,
-      secSpots,
-    ]);
-    final maxY = _autoMaxY([
-      if (showSys) sysSpots,
-      if (showDia) diaSpots,
-      secSpots,
-    ]);
+    // Left axis limits based only on BP series
+    final minY = _autoMinY([if (showSys) sysSpots, if (showDia) diaSpots]) - 10;
+    final maxY = _autoMaxY([if (showSys) sysSpots, if (showDia) diaSpots]) + 10;
 
     return LineChart(
       LineChartData(
@@ -472,6 +492,8 @@ class TrendChart extends StatelessWidget {
         rangeAnnotations: cu.zoneAnnotations(
           showSys: showSys,
           showDia: showDia,
+          enabled: showBands,
+          scheme: zoneScheme,
         ),
       ),
     );

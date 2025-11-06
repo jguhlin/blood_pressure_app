@@ -16,6 +16,9 @@ class AdvancedSettingsSheet extends StatefulWidget {
   final TimeOfDay? doseTime;
   final void Function(bool) onAnchorToDose;
   final void Function(TimeOfDay) onDoseTimeChanged;
+  // Zone scheme
+  final String zoneScheme; // 'acc_aha' or 'esc_esh'
+  final void Function(String) onZoneScheme;
 
   final List<Event> events;
   final Future<void> Function(String title, DateTime date) onAddEvent;
@@ -58,6 +61,8 @@ class AdvancedSettingsSheet extends StatefulWidget {
     required this.doseTime,
     required this.onAnchorToDose,
     required this.onDoseTimeChanged,
+    required this.zoneScheme,
+    required this.onZoneScheme,
     required this.events,
     required this.onAddEvent,
     required this.onRenameEvent,
@@ -162,6 +167,32 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                       ),
                     ),
                 ],
+              ),
+              const Divider(),
+              const SizedBox(height: 8),
+              const Text('BP Zone Guidelines (Trend background)'),
+              RadioGroup<String>(
+                groupValue: widget.zoneScheme,
+                onChanged: (v) {
+                  if (v != null) widget.onZoneScheme(v);
+                  setState(() {});
+                },
+                child: Row(
+                  children: const [
+                    Expanded(
+                      child: RadioListTile<String>(
+                        title: Text('US (ACC/AHA)'),
+                        value: 'acc_aha',
+                      ),
+                    ),
+                    Expanded(
+                      child: RadioListTile<String>(
+                        title: Text('EU (ESC/ESH)'),
+                        value: 'esc_esh',
+                      ),
+                    ),
+                  ],
+                ),
               ),
               const Divider(),
               const Text('Events (Bookmarks)'),
