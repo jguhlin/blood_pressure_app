@@ -107,7 +107,9 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                     child: RadioListTile<String>(
                       title: const Text('Moving Average'),
                       value: 'ma',
+                      // ignore: deprecated_member_use
                       groupValue: widget.trendSmoothMethod,
+                      // ignore: deprecated_member_use
                       onChanged: (v) {
                         if (v != null) widget.onTrendSmoothMethod(v);
                         setState(() {});
@@ -118,7 +120,9 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                     child: RadioListTile<String>(
                       title: const Text('EMA'),
                       value: 'ema',
+                      // ignore: deprecated_member_use
                       groupValue: widget.trendSmoothMethod,
+                      // ignore: deprecated_member_use
                       onChanged: (v) {
                         if (v != null) widget.onTrendSmoothMethod(v);
                         setState(() {});
