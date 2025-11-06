@@ -186,6 +186,11 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                       child: RadioListTile<String>(
                         title: Text('US (ACC/AHA)'),
                         value: 'acc_aha',
+                        secondary: Tooltip(
+                          message:
+                              'ACC/AHA 2017: Elevated 120–129/<80; Stage1 130–139/80–89; Stage2 ≥140/90. Ref: 2017 High Blood Pressure Guideline (AHA/ACC).',
+                          child: Icon(Icons.info_outline, size: 16),
+                        ),
                       ),
                     ),
                     SizedBox(
@@ -193,6 +198,11 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                       child: RadioListTile<String>(
                         title: Text('EU (ESC/ESH)'),
                         value: 'esc_esh',
+                        secondary: Tooltip(
+                          message:
+                              'ESC/ESH 2018: Normal <130/<85; High-normal 130–139/85–89; Grade1 140–159/90–99; Grade2 160–179/100–109; Grade3 ≥180/≥110. Ref: ESC/ESH 2018 Guidelines.',
+                          child: Icon(Icons.info_outline, size: 16),
+                        ),
                       ),
                     ),
                     SizedBox(
@@ -200,6 +210,11 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                       child: RadioListTile<String>(
                         title: Text('Australia (NHFA)'),
                         value: 'aus',
+                        secondary: Tooltip(
+                          message:
+                              'Australia NHFA 2016: Office thresholds and grading align closely with ESC/ESH. Ref: National Heart Foundation 2016.',
+                          child: Icon(Icons.info_outline, size: 16),
+                        ),
                       ),
                     ),
                     SizedBox(
@@ -207,6 +222,11 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                       child: RadioListTile<String>(
                         title: Text('New Zealand'),
                         value: 'nz',
+                        secondary: Tooltip(
+                          message:
+                              'New Zealand: Primary care thresholds align with ESC/ESH-style office cutoffs. Ref: NZ guidance summaries.',
+                          child: Icon(Icons.info_outline, size: 16),
+                        ),
                       ),
                     ),
                     SizedBox(
@@ -214,6 +234,11 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                       child: RadioListTile<String>(
                         title: Text('UK (NICE)'),
                         value: 'nice_uk',
+                        secondary: Tooltip(
+                          message:
+                              'NICE (UK): Key office thresholds 140/90, 160/100, 180/120 for staging/urgency. Ref: NICE Hypertension guideline.',
+                          child: Icon(Icons.info_outline, size: 16),
+                        ),
                       ),
                     ),
                     SizedBox(
@@ -221,6 +246,11 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                       child: RadioListTile<String>(
                         title: Text('ISH (International)'),
                         value: 'ish',
+                        secondary: Tooltip(
+                          message:
+                              'ISH 2020: Grade 1 ≥140/90 to <160/100; Grade 2 ≥160/100. Ref: ISH 2020 guideline.',
+                          child: Icon(Icons.info_outline, size: 16),
+                        ),
                       ),
                     ),
                     SizedBox(
@@ -228,6 +258,11 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                       child: RadioListTile<String>(
                         title: Text('Hypertension Canada'),
                         value: 'can',
+                        secondary: Tooltip(
+                          message:
+                              'Hypertension Canada: Office staging similar to ESC; targets vary by comorbidity. Ref: Hypertension Canada guidelines.',
+                          child: Icon(Icons.info_outline, size: 16),
+                        ),
                       ),
                     ),
                     SizedBox(
@@ -235,6 +270,11 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                       child: RadioListTile<String>(
                         title: Text('Japan (JSH)'),
                         value: 'jsh',
+                        secondary: Tooltip(
+                          message:
+                              'JSH (Japan): Grade 1 140–159/90–99; Grade 2 160–179/100–109; Grade 3 ≥180/≥110. Ref: JSH 2019/2021.',
+                          child: Icon(Icons.info_outline, size: 16),
+                        ),
                       ),
                     ),
                   ],
