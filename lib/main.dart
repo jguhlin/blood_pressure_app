@@ -71,9 +71,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
   int _surgeSteps30Min = 100; // steps in 30 min threshold
   int _surgeWakeEarliestHour = 3; // earliest wake search hour
   int _surgeWakeLatestHour = 11; // latest wake search hour
-  // Add-reading defaults
-  String _bpBodyPosition = 'sitting'; // sitting, standing, supine
-  String _bpArm = 'left_upper_arm'; // left_upper_arm, right_upper_arm, wrist
+  // Add-reading: no local health details stored
   _BPEntry? _latest;
   List<_BPEntry> _series = const [];
   List<cm.ChartSecPoint> _secSeries = const [];
@@ -129,8 +127,6 @@ class _LatestBPPageState extends State<LatestBPPage> {
     _trendDistribution =
         prefs.getBool('trend_distribution') ?? _trendDistribution;
     _secondMetric = prefs.getString('second_metric') ?? _secondMetric;
-    _bpBodyPosition = prefs.getString('bp_body_position') ?? _bpBodyPosition;
-    _bpArm = prefs.getString('bp_arm') ?? _bpArm;
     _pdfIncludeBothCharts =
         prefs.getBool('pdf_include_both_charts') ?? _pdfIncludeBothCharts;
     _surgeMorningWindowHours =
@@ -200,8 +196,6 @@ class _LatestBPPageState extends State<LatestBPPage> {
     await prefs.setBool('trend_tooltips', _trendTooltips);
     await prefs.setBool('trend_distribution', _trendDistribution);
     await prefs.setString('second_metric', _secondMetric);
-    await prefs.setString('bp_body_position', _bpBodyPosition);
-    await prefs.setString('bp_arm', _bpArm);
     await prefs.setBool('pdf_include_both_charts', _pdfIncludeBothCharts);
     await _saveEvents(prefs);
     await prefs.setInt('surge_morning_window_h', _surgeMorningWindowHours);
@@ -1769,9 +1763,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
       isScrollControlled: true,
       builder: (ctx) {
         return AddBpSheet(
-          defaultPosition: _bpBodyPosition,
-          defaultArm: _bpArm,
-          onSave: (s, d, when, pos, arm) async {
+          onSave: (s, d, when) async {
             // Ensure WRITE permission for BP
             final okPerm = await _ensureWritePermission();
             if (!okPerm) {
@@ -1790,14 +1782,6 @@ class _LatestBPPageState extends State<LatestBPPage> {
               startTime: when,
             );
             if (ok) {
-              if (mounted) {
-                setState(() {
-                  _bpBodyPosition = pos;
-                  _bpArm = arm;
-                });
-              }
-              await _savePrefs();
-              await _saveBpAnnotation(when, pos, arm);
               await _fetchData();
               return true;
             }
@@ -2025,7 +2009,6 @@ class _LatestBPPageState extends State<LatestBPPage> {
         await _savePrefs();
       }
 
-      await _loadAnnotations();
       final doc = pw.Document();
       final eff = _effectiveRangeLabel(_series, _rangeStart, _rangeEnd);
       final secSummary = _secondarySummaryText();
@@ -2097,8 +2080,6 @@ class _LatestBPPageState extends State<LatestBPPage> {
                   pw.Text('Time'),
                   pw.Text('SBP'),
                   pw.Text('DBP'),
-                  pw.Text('Pos'),
-                  pw.Text('Arm'),
                   pw.Text('Source'),
                 ],
               ),
@@ -2111,7 +2092,6 @@ class _LatestBPPageState extends State<LatestBPPage> {
               );
             for (final e in list.take(20)) {
               final bg = _pdfBgForBp(e);
-              final ann = _annotationFor(e.timestamp);
               rows.add(
                 pw.TableRow(
                   children: [
@@ -2134,16 +2114,6 @@ class _LatestBPPageState extends State<LatestBPPage> {
                       color: bg,
                       padding: const pw.EdgeInsets.all(2),
                       child: pw.Text(e.diastolic?.toStringAsFixed(0) ?? '-'),
-                    ),
-                    pw.Container(
-                      color: bg,
-                      padding: const pw.EdgeInsets.all(2),
-                      child: pw.Text(ann?.$1 ?? '-'),
-                    ),
-                    pw.Container(
-                      color: bg,
-                      padding: const pw.EdgeInsets.all(2),
-                      child: pw.Text(ann?.$2 ?? '-'),
                     ),
                     pw.Container(
                       color: bg,
@@ -2239,8 +2209,6 @@ class _LatestBPPageState extends State<LatestBPPage> {
           pw.Text('Time'),
           pw.Text('SBP'),
           pw.Text('DBP'),
-          pw.Text('Pos'),
-          pw.Text('Arm'),
           pw.Text('Source'),
         ],
       ),
@@ -2252,7 +2220,6 @@ class _LatestBPPageState extends State<LatestBPPage> {
       );
     for (final e in list.take(take)) {
       final bg = _pdfBgForBp(e);
-      final ann = _annotationFor(e.timestamp);
       rows.add(
         pw.TableRow(
           children: [
@@ -2275,16 +2242,6 @@ class _LatestBPPageState extends State<LatestBPPage> {
               color: bg,
               padding: const pw.EdgeInsets.all(2),
               child: pw.Text(e.diastolic?.toStringAsFixed(0) ?? '-'),
-            ),
-            pw.Container(
-              color: bg,
-              padding: const pw.EdgeInsets.all(2),
-              child: pw.Text(ann?.$1 ?? '-'),
-            ),
-            pw.Container(
-              color: bg,
-              padding: const pw.EdgeInsets.all(2),
-              child: pw.Text(ann?.$2 ?? '-'),
             ),
             pw.Container(
               color: bg,
@@ -2457,72 +2414,6 @@ class _LatestBPPageState extends State<LatestBPPage> {
     if (s >= 120) return PdfColor.fromInt(0xFFFFFDE7); // yellow tint
     return PdfColor.fromInt(0xFFE8F5E9); // green tint
   }
-
-  // ------- Local annotations (position/arm) -------
-  // We store per-reading annotations when saving via Add BP flow.
-  Future<void> _saveBpAnnotation(DateTime t, String pos, String arm) async {
-    final prefs = await SharedPreferences.getInstance();
-    final list = prefs.getStringList('bp_annotations') ?? <String>[];
-    final entry = jsonEncode({
-      't': t.toIso8601String(),
-      'pos': pos,
-      'arm': arm,
-    });
-    list.add(entry);
-    await prefs.setStringList('bp_annotations', list);
-  }
-
-  // (pos, arm) tuple if a locally-saved annotation matches timestamp (within 60s).
-  (String, String)? _annotationFor(DateTime? t) {
-    if (t == null) return null;
-    // For performance we could cache, but the list is tiny (< few hundred)
-    // This runs only during export (top 20 rows)
-    try {
-      // Synchronously read prefs isn't available; use async? Simplify by using sync cache:
-      // In this code path we cannot await; instead, we read once elsewhere. As a compromise,
-      // we use a cached copy stored on state during previous save, else fallback to blocking
-      // style via SharedPreferences.getInstance() then getStringList.
-      // Because this is rarely called, a simple synchronous-like read is acceptable.
-    } catch (_) {}
-    return _annotationForSync(t);
-  }
-
-  (String, String)? _annotationForSync(DateTime t) {
-    // Load map from SharedPreferences (synchronously via thenable workaround)
-    // We can't block here; but for PDF build it's fine to use `SharedPreferences.getInstance()` synchronously
-    // since pdf build runs in async outer method and we call this only after awaiting.
-    // So call getInstance synchronously by accessing then() is cumbersome; instead we cache globally.
-    // For simplicity, keep a static cache on first call in this frame using a Future.
-    // Implement a simple blocking-like method by using a Zone microtask—here we accept a small risk and return null if unavailable.
-    return _annotations
-        .firstWhere(
-          (ann) => (ann.t.difference(t).inSeconds).abs() <= 60,
-          orElse: () => _BpAnn.empty,
-        )
-        .toTuple();
-  }
-
-  List<_BpAnn> _annotations = const [];
-  Future<void> _loadAnnotations() async {
-    final prefs = await SharedPreferences.getInstance();
-    final list = prefs.getStringList('bp_annotations') ?? <String>[];
-    final out = <_BpAnn>[];
-    for (final s in list) {
-      try {
-        final m = jsonDecode(s) as Map<String, dynamic>;
-        out.add(
-          _BpAnn(
-            t: DateTime.parse(m['t'] as String),
-            pos: (m['pos'] as String?) ?? '',
-            arm: (m['arm'] as String?) ?? '',
-          ),
-        );
-      } catch (_) {}
-    }
-    _annotations = out;
-  }
-
-  // old label helpers removed; using static labels in _BpAnn
 
   String _secondarySummaryText() {
     if (_secondMetric == 'none') return '';
@@ -2848,47 +2739,7 @@ class _BPEntry {
 
 // old secondary DTOs removed; using models/chart_models.dart
 
-class _BpAnn {
-  final DateTime t;
-  final String pos;
-  final String arm;
-  const _BpAnn({required this.t, required this.pos, required this.arm});
-  static final empty = _BpAnn(
-    t: DateTime.fromMillisecondsSinceEpoch(0),
-    pos: '',
-    arm: '',
-  );
-  (String, String)? toTuple() {
-    if (pos.isEmpty && arm.isEmpty) return null;
-    return (_posLabelStatic(pos), _armLabelStatic(arm));
-  }
-
-  static String _posLabelStatic(String code) {
-    switch (code) {
-      case 'sitting':
-        return 'Sitting';
-      case 'standing':
-        return 'Standing';
-      case 'supine':
-        return 'Supine';
-      default:
-        return '-';
-    }
-  }
-
-  static String _armLabelStatic(String code) {
-    switch (code) {
-      case 'left_upper_arm':
-        return 'Left UA';
-      case 'right_upper_arm':
-        return 'Right UA';
-      case 'wrist':
-        return 'Wrist';
-      default:
-        return '-';
-    }
-  }
-}
+// Body position/arm annotations removed to avoid local health data storage.
 
 /* class _TrendChart extends StatelessWidget {
   final List<_BPEntry> series;
