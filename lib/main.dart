@@ -363,11 +363,24 @@ class _LatestBPPageState extends State<LatestBPPage> {
         return out;
       }
 
-      final pts = await _health.getHealthDataFromTypes(
+      var pts = await _health.getHealthDataFromTypes(
         types: [t!],
         startTime: start,
         endTime: end,
       );
+      if (pts.isEmpty) {
+        try {
+          final histGranted = await _health
+              .requestHealthDataHistoryAuthorization();
+          if (histGranted) {
+            pts = await _health.getHealthDataFromTypes(
+              types: [t],
+              startTime: start,
+              endTime: end,
+            );
+          }
+        } catch (_) {}
+      }
       final byDay = <DateTime, List<double>>{};
       for (final p in pts) {
         final day = DateTime(p.dateTo.year, p.dateTo.month, p.dateTo.day);
@@ -426,11 +439,24 @@ class _LatestBPPageState extends State<LatestBPPage> {
         return const [];
     }
     try {
-      final pts = await _health.getHealthDataFromTypes(
+      var pts = await _health.getHealthDataFromTypes(
         types: [t],
         startTime: start,
         endTime: end,
       );
+      if (pts.isEmpty) {
+        try {
+          final histGranted = await _health
+              .requestHealthDataHistoryAuthorization();
+          if (histGranted) {
+            pts = await _health.getHealthDataFromTypes(
+              types: [t],
+              startTime: start,
+              endTime: end,
+            );
+          }
+        } catch (_) {}
+      }
       final out = <cm.ChartSecSample>[];
       for (final p in pts) {
         double? v = _toDouble(p.value);
@@ -1205,6 +1231,24 @@ class _LatestBPPageState extends State<LatestBPPage> {
                         ),
                       ),
                     ],
+                  ),
+                if (_mode == _ViewMode.trend &&
+                    _showBands &&
+                    (_showSys ^ _showDia))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: _GuidelineLegend(
+                      isSys: _showSys && !_showDia,
+                      scheme: _bpZoneScheme,
+                    ),
+                  ),
+                if (_mode == _ViewMode.trend && !_showSys && !_showDia)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 6),
+                    child: Text(
+                      'Hint: Enable Systolic or Diastolic to see bands and scale.',
+                      style: TextStyle(fontSize: 12, color: Colors.black54),
+                    ),
                   ),
                 Row(
                   children: [
@@ -4223,6 +4267,44 @@ class _ReadingsSection extends StatelessWidget {
     final d = t.toLocal();
     String two(int n) => n.toString().padLeft(2, '0');
     return '${two(d.hour)}:${two(d.minute)}';
+  }
+}
+
+class _GuidelineLegend extends StatelessWidget {
+  final bool isSys;
+  final String scheme;
+  const _GuidelineLegend({required this.isSys, required this.scheme});
+  @override
+  Widget build(BuildContext context) {
+    final bands = cu.legendBands(isSys: isSys, scheme: scheme);
+    return Wrap(
+      spacing: 8,
+      runSpacing: 4,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        for (final b in bands)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: b.color.withValues(alpha: 0.35),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              isSys ? 'SBP ${_bandLabel(b)}' : 'DBP ${_bandLabel(b)}',
+              style: const TextStyle(fontSize: 11),
+            ),
+          ),
+      ],
+    );
+  }
+
+  String _bandLabel(cu.ZoneBand b) {
+    final low = b.y1.round();
+    final high = b.y2.round();
+    if (high >= 300) {
+      return '≥ $low (${b.label})';
+    }
+    return '$low–$high (${b.label})';
   }
 }
 
