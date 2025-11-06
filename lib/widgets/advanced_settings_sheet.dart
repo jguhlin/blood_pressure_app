@@ -177,18 +177,64 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                   if (v != null) widget.onZoneScheme(v);
                   setState(() {});
                 },
-                child: Row(
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 0,
                   children: const [
-                    Expanded(
+                    SizedBox(
+                      width: 220,
                       child: RadioListTile<String>(
                         title: Text('US (ACC/AHA)'),
                         value: 'acc_aha',
                       ),
                     ),
-                    Expanded(
+                    SizedBox(
+                      width: 220,
                       child: RadioListTile<String>(
                         title: Text('EU (ESC/ESH)'),
                         value: 'esc_esh',
+                      ),
+                    ),
+                    SizedBox(
+                      width: 220,
+                      child: RadioListTile<String>(
+                        title: Text('Australia (NHFA)'),
+                        value: 'aus',
+                      ),
+                    ),
+                    SizedBox(
+                      width: 220,
+                      child: RadioListTile<String>(
+                        title: Text('New Zealand'),
+                        value: 'nz',
+                      ),
+                    ),
+                    SizedBox(
+                      width: 220,
+                      child: RadioListTile<String>(
+                        title: Text('UK (NICE)'),
+                        value: 'nice_uk',
+                      ),
+                    ),
+                    SizedBox(
+                      width: 220,
+                      child: RadioListTile<String>(
+                        title: Text('ISH (International)'),
+                        value: 'ish',
+                      ),
+                    ),
+                    SizedBox(
+                      width: 220,
+                      child: RadioListTile<String>(
+                        title: Text('Hypertension Canada'),
+                        value: 'can',
+                      ),
+                    ),
+                    SizedBox(
+                      width: 220,
+                      child: RadioListTile<String>(
+                        title: Text('Japan (JSH)'),
+                        value: 'jsh',
                       ),
                     ),
                   ],

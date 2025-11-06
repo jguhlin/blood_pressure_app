@@ -16,7 +16,11 @@ RangeAnnotations zoneAnnotations({
   final bands = <HorizontalRangeAnnotation>[];
 
   if (isSys) {
-    if (scheme == 'esc_esh' || scheme == 'nz') {
+    if (scheme == 'esc_esh' ||
+        scheme == 'nz' ||
+        scheme == 'can' ||
+        scheme == 'jsh' ||
+        scheme == 'aus') {
       // ESC/ESH 2018: <130 normal; 130–139 high-normal; 140–159 grade1; 160–179 grade2; 180+ grade3
       bands.addAll([
         HorizontalRangeAnnotation(
@@ -145,7 +149,11 @@ RangeAnnotations zoneAnnotations({
       ]);
     }
   } else {
-    if (scheme == 'esc_esh' || scheme == 'nz') {
+    if (scheme == 'esc_esh' ||
+        scheme == 'nz' ||
+        scheme == 'can' ||
+        scheme == 'jsh' ||
+        scheme == 'aus') {
       // ESC/ESH 2018: DBP <85 normal; 85–89 high-normal; 90–99 grade1; 100–109 grade2; 110+ grade3
       bands.addAll([
         HorizontalRangeAnnotation(
@@ -275,7 +283,11 @@ RangeAnnotations zoneAnnotations({
 Color colorForSbp(num? sbp, {String scheme = 'acc_aha'}) {
   if (sbp == null) return Colors.black87;
   final v = sbp.toDouble();
-  if (scheme == 'esc_esh' || scheme == 'nz' || scheme == 'aus') {
+  if (scheme == 'esc_esh' ||
+      scheme == 'nz' ||
+      scheme == 'aus' ||
+      scheme == 'can' ||
+      scheme == 'jsh') {
     if (v >= 180) return const Color(0xFFB71C1C);
     if (v >= 160) return const Color(0xFFF44336);
     if (v >= 140) return const Color(0xFFFF9800);
@@ -302,7 +314,11 @@ Color colorForSbp(num? sbp, {String scheme = 'acc_aha'}) {
 Color colorForDbp(num? dbp, {String scheme = 'acc_aha'}) {
   if (dbp == null) return Colors.black87;
   final v = dbp.toDouble();
-  if (scheme == 'esc_esh' || scheme == 'nz' || scheme == 'aus') {
+  if (scheme == 'esc_esh' ||
+      scheme == 'nz' ||
+      scheme == 'aus' ||
+      scheme == 'can' ||
+      scheme == 'jsh') {
     if (v >= 110) return const Color(0xFFB71C1C);
     if (v >= 100) return const Color(0xFFF44336);
     if (v >= 90) return const Color(0xFFFF9800);
@@ -370,7 +386,11 @@ List<ZoneBand> legendBands({required bool isSys, String scheme = 'acc_aha'}) {
           label = 'Crisis';
         }
       }
-    } else if (scheme == 'esc_esh' || scheme == 'nz' || scheme == 'aus') {
+    } else if (scheme == 'esc_esh' ||
+        scheme == 'nz' ||
+        scheme == 'aus' ||
+        scheme == 'can' ||
+        scheme == 'jsh') {
       if (isSys) {
         if (y2 <= 130) {
           label = 'Normal';
