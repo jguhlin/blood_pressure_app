@@ -395,6 +395,105 @@ class AverageDayChart extends StatelessWidget {
         }
         secMin = 0;
         secMax = 1;
+      } else if (secondaryLabel == 'energy') {
+        // Compute kcal/min per bin
+        final sums = List<double>.filled(agg.minutes.length, 0.0);
+        final mins = List<double>.filled(agg.minutes.length, 0.0);
+        for (final s in secondarySamples) {
+          final start = s.start ?? s.t.subtract(const Duration(minutes: 1));
+          final end = s.end ?? s.t;
+          final totalMin = (end.difference(start).inSeconds / 60.0).clamp(
+            0.0,
+            1440.0,
+          );
+          // assume s.v is total kcal over the segment; rate = v / totalMin
+          final rate = (totalMin > 0) ? (s.v / totalMin) : s.v; // kcal/min
+          DateTime cur = start;
+          while (cur.isBefore(end)) {
+            final binStartMin = ((cur.hour * 60 + cur.minute) ~/ 15) * 15;
+            int binIdx;
+            if (anchorMinute != null) {
+              int anchored = (binStartMin - anchorMinute!) % 1440;
+              if (anchored < 0) anchored += 1440;
+              binIdx = (anchored / 15).floor();
+            } else {
+              binIdx = (binStartMin / 15).floor();
+            }
+            binIdx = binIdx.clamp(0, agg.minutes.length - 1);
+            final binStart = DateTime(
+              cur.year,
+              cur.month,
+              cur.day,
+              binStartMin ~/ 60,
+              binStartMin % 60,
+            );
+            final binEnd = binStart.add(const Duration(minutes: 15));
+            final segEnd = end.isBefore(binEnd) ? end : binEnd;
+            final overlap = (segEnd.difference(cur).inSeconds / 60.0).clamp(
+              0.0,
+              15.0,
+            );
+            if (overlap > 0) {
+              sums[binIdx] += rate * overlap; // kcal
+              mins[binIdx] += overlap;
+            }
+            cur = segEnd;
+          }
+        }
+        for (int i = 0; i < agg.minutes.length; i++) {
+          final m = mins[i];
+          if (m > 0) secSeriesVals[i] = sums[i] / m; // kcal/min
+        }
+        final ys = secSeriesVals.whereType<double>().toList();
+        if (ys.isNotEmpty) {
+          secMin = ys.reduce(math.min);
+          secMax = ys.reduce(math.max);
+        }
+      } else if (secondaryLabel == 'workouts') {
+        // Compute minutes of workout within bin
+        final mins = List<double>.filled(agg.minutes.length, 0.0);
+        for (final s in secondarySamples) {
+          final start = s.start ?? s.t.subtract(const Duration(minutes: 1));
+          final end = s.end ?? s.t;
+          DateTime cur = start;
+          while (cur.isBefore(end)) {
+            final binStartMin = ((cur.hour * 60 + cur.minute) ~/ 15) * 15;
+            int binIdx;
+            if (anchorMinute != null) {
+              int anchored = (binStartMin - anchorMinute!) % 1440;
+              if (anchored < 0) anchored += 1440;
+              binIdx = (anchored / 15).floor();
+            } else {
+              binIdx = (binStartMin / 15).floor();
+            }
+            binIdx = binIdx.clamp(0, agg.minutes.length - 1);
+            final binStart = DateTime(
+              cur.year,
+              cur.month,
+              cur.day,
+              binStartMin ~/ 60,
+              binStartMin % 60,
+            );
+            final binEnd = binStart.add(const Duration(minutes: 15));
+            final segEnd = end.isBefore(binEnd) ? end : binEnd;
+            final overlap = (segEnd.difference(cur).inSeconds / 60.0).clamp(
+              0.0,
+              15.0,
+            );
+            if (overlap > 0) {
+              mins[binIdx] += overlap;
+            }
+            cur = segEnd;
+          }
+        }
+        for (int i = 0; i < agg.minutes.length; i++) {
+          if (mins[i] > 0) secSeriesVals[i] = mins[i]; // minutes in bin
+        }
+        final ys = secSeriesVals.whereType<double>().toList();
+        if (ys.isNotEmpty) {
+          secMin = ys.reduce(math.min);
+          secMax = ys.reduce(math.max);
+        }
       } else {
         final bins = List.generate(agg.minutes.length, (_) => <double>[]);
         for (final s in secondarySamples) {
@@ -548,9 +647,13 @@ class AverageDayChart extends StatelessWidget {
     if (secSpots.isEmpty) return chart;
 
     // Overlay right-axis labels
-    String fmtTick(double v) => secondaryLabel == 'sleep'
-        ? (v * 100).round().toString()
-        : v.round().toString();
+    String fmtTick(double v) {
+      if (secondaryLabel == 'sleep') return (v * 100).round().toString();
+      if (secondaryLabel == 'energy') return v.toStringAsFixed(1); // kcal/min
+      if (secondaryLabel == 'workouts') return v.toStringAsFixed(0); // minutes
+      return v.round().toString();
+    }
+
     final ticks = <double>[];
     final tickVals = <String>[];
     final leftRange = (maxY - minY).abs() < 1e-6 ? 1.0 : (maxY - minY);

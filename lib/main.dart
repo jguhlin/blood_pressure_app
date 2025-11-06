@@ -438,12 +438,61 @@ class _LatestBPPageState extends State<LatestBPPage> {
       case 'sleep':
         t = HealthDataType.SLEEP_ASLEEP;
         break;
+      case 'energy':
+        t = HealthDataType.ACTIVE_ENERGY_BURNED;
+        break;
+      case 'workouts':
+        t = null; // special handling below
+        break;
       default:
         return const [];
     }
     try {
+      if (_secondMetric == 'workouts') {
+        final out = <cm.ChartSecSample>[];
+        try {
+          final ex = await _health.getHealthDataFromTypes(
+            types: [HealthDataType.EXERCISE_TIME],
+            startTime: start,
+            endTime: end,
+          );
+          for (final p in ex) {
+            final durMin = p.dateTo.difference(p.dateFrom).inMinutes.toDouble();
+            out.add(
+              cm.ChartSecSample(
+                t: p.dateTo,
+                v: durMin,
+                start: p.dateFrom,
+                end: p.dateTo,
+                durMin: durMin,
+              ),
+            );
+          }
+        } catch (_) {}
+        try {
+          final ws = await _health.getHealthDataFromTypes(
+            types: [HealthDataType.WORKOUT],
+            startTime: start,
+            endTime: end,
+          );
+          for (final p in ws) {
+            final durMin = p.dateTo.difference(p.dateFrom).inMinutes.toDouble();
+            out.add(
+              cm.ChartSecSample(
+                t: p.dateTo,
+                v: durMin,
+                start: p.dateFrom,
+                end: p.dateTo,
+                durMin: durMin,
+              ),
+            );
+          }
+        } catch (_) {}
+        out.sort((a, b) => a.t.compareTo(b.t));
+        return out;
+      }
       var pts = await _health.getHealthDataFromTypes(
-        types: [t],
+        types: [t!],
         startTime: start,
         endTime: end,
       );
@@ -1442,7 +1491,9 @@ class _LatestBPPageState extends State<LatestBPPage> {
                                       _secondMetric == 'hrv_sdnn' ||
                                       _secondMetric == 'hrv_rmssd' ||
                                       _secondMetric == 'steps' ||
-                                      _secondMetric == 'sleep')
+                                      _secondMetric == 'sleep' ||
+                                      _secondMetric == 'energy' ||
+                                      _secondMetric == 'workouts')
                                   ? _secSamples
                                   : const [],
                               secondaryLabel: _secondMetric,
