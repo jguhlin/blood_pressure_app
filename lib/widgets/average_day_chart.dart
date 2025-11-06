@@ -216,6 +216,70 @@ class AverageDayChart extends StatelessWidget {
           );
         }
       }
+
+      // Overlay raw reading dots (smaller than Trend)
+      if (showSys) {
+        final rawSys = <FlSpot>[];
+        for (final e in series) {
+          final t = e.t;
+          if (t == null || e.sbp == null) continue;
+          var m = t.hour * 60 + t.minute + t.second / 60.0;
+          if (anchorMinute != null) {
+            m = (m - anchorMinute!) % 1440;
+            if (m < 0) m += 1440;
+          }
+          rawSys.add(FlSpot(m / 60.0, e.sbp!));
+        }
+        if (rawSys.isNotEmpty) {
+          bars.add(
+            LineChartBarData(
+              spots: rawSys,
+              isCurved: false,
+              color: Colors.red.withValues(alpha: 0.25),
+              barWidth: 0,
+              dotData: FlDotData(
+                show: true,
+                getDotPainter: (s, p, b, i) => FlDotCirclePainter(
+                  radius: 1.5,
+                  color: Colors.red.withValues(alpha: 0.35),
+                  strokeWidth: 0,
+                ),
+              ),
+            ),
+          );
+        }
+      }
+      if (showDia) {
+        final rawDia = <FlSpot>[];
+        for (final e in series) {
+          final t = e.t;
+          if (t == null || e.dbp == null) continue;
+          var m = t.hour * 60 + t.minute + t.second / 60.0;
+          if (anchorMinute != null) {
+            m = (m - anchorMinute!) % 1440;
+            if (m < 0) m += 1440;
+          }
+          rawDia.add(FlSpot(m / 60.0, e.dbp!));
+        }
+        if (rawDia.isNotEmpty) {
+          bars.add(
+            LineChartBarData(
+              spots: rawDia,
+              isCurved: false,
+              color: Colors.blue.withValues(alpha: 0.25),
+              barWidth: 0,
+              dotData: FlDotData(
+                show: true,
+                getDotPainter: (s, p, b, i) => FlDotCirclePainter(
+                  radius: 1.5,
+                  color: Colors.blue.withValues(alpha: 0.35),
+                  strokeWidth: 0,
+                ),
+              ),
+            ),
+          );
+        }
+      }
     }
 
     // Secondary series mapping
