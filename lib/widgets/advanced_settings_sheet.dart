@@ -88,6 +88,43 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
   final titleCtl = TextEditingController();
   DateTime newEventDate = DateTime.now();
   String q = '';
+  // Local mirror state so the sheet updates immediately without needing a parent rebuild
+  late String _trendSmoothMethod;
+  late bool _trendSmoothAuto;
+  late int _trendSmoothDays;
+  late bool _showBands;
+  late bool _anchorToDose;
+  TimeOfDay? _doseTimeLocal;
+  late String _zoneScheme;
+  late int _surgeMorningWindowHours;
+  late int _surgeTroughWindowHours;
+  late int _surgePrewakeHours;
+  late int _surgeHrRiseBpm;
+  late int _surgeSteps30Min;
+  late int _surgeWakeEarliestHour;
+  late int _surgeWakeLatestHour;
+  late List<Event> _eventsLocal;
+
+  @override
+  void initState() {
+    super.initState();
+    _trendSmoothMethod = widget.trendSmoothMethod;
+    _trendSmoothAuto = widget.trendSmoothAuto;
+    _trendSmoothDays = widget.trendSmoothDays;
+    _showBands = widget.showBands;
+    _anchorToDose = widget.anchorToDose;
+    _doseTimeLocal = widget.doseTime;
+    _zoneScheme = widget.zoneScheme;
+    _surgeMorningWindowHours = widget.surgeMorningWindowHours;
+    _surgeTroughWindowHours = widget.surgeTroughWindowHours;
+    _surgePrewakeHours = widget.surgePrewakeHours;
+    _surgeHrRiseBpm = widget.surgeHrRiseBpm;
+    _surgeSteps30Min = widget.surgeSteps30Min;
+    _surgeWakeEarliestHour = widget.surgeWakeEarliestHour;
+    _surgeWakeLatestHour = widget.surgeWakeLatestHour;
+    _eventsLocal = List<Event>.from(widget.events);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -107,10 +144,13 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
               const SizedBox(height: 12),
               const Text('Trend Smoother'),
               RadioGroup<String>(
-                groupValue: widget.trendSmoothMethod,
+                groupValue: _trendSmoothMethod,
                 onChanged: (v) {
-                  if (v != null) widget.onTrendSmoothMethod(v);
-                  setState(() {});
+                  if (v != null) {
+                    _trendSmoothMethod = v;
+                    widget.onTrendSmoothMethod(v);
+                    setState(() {});
+                  }
                 },
                 child: Row(
                   children: const [
@@ -134,31 +174,33 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                   const Text('Auto window'),
                   const SizedBox(width: 6),
                   Switch(
-                    value: widget.trendSmoothAuto,
+                    value: _trendSmoothAuto,
                     onChanged: (v) {
+                      _trendSmoothAuto = v;
                       widget.onTrendSmoothAuto(v);
                       setState(() {});
                     },
                   ),
                   const SizedBox(width: 12),
-                  if (!widget.trendSmoothAuto)
+                  if (!_trendSmoothAuto)
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Window: ${widget.trendSmoothDays}d',
+                            'Window: ${_trendSmoothDays}d',
                             style: const TextStyle(fontSize: 12),
                           ),
                           Slider(
-                            value: widget.trendSmoothDays.toDouble(),
+                            value: _trendSmoothDays.toDouble(),
                             min: 3,
                             max: 15,
                             divisions: 6,
-                            label: '${widget.trendSmoothDays}d',
+                            label: '${_trendSmoothDays}d',
                             onChanged: (v) {
                               int d = v.round();
                               if (d % 2 == 0) d += 1;
+                              _trendSmoothDays = d;
                               widget.onTrendSmoothDays(d);
                               setState(() {});
                             },
@@ -172,10 +214,13 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
               const SizedBox(height: 8),
               const Text('BP Zone Guidelines (Trend background)'),
               RadioGroup<String>(
-                groupValue: widget.zoneScheme,
+                groupValue: _zoneScheme,
                 onChanged: (v) {
-                  if (v != null) widget.onZoneScheme(v);
-                  setState(() {});
+                  if (v != null) {
+                    _zoneScheme = v;
+                    widget.onZoneScheme(v);
+                    setState(() {});
+                  }
                 },
                 child: Wrap(
                   spacing: 8,
@@ -306,10 +351,20 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                   ElevatedButton.icon(
                     onPressed: () async {
                       if (titleCtl.text.trim().isEmpty) return;
-                      await widget.onAddEvent(
-                        titleCtl.text.trim(),
-                        newEventDate,
-                      );
+                      final t = titleCtl.text.trim();
+                      await widget.onAddEvent(t, newEventDate);
+                      _eventsLocal = [
+                        Event(
+                          id: 'evt_${DateTime.now().microsecondsSinceEpoch}',
+                          title: t,
+                          date: DateTime(
+                            newEventDate.year,
+                            newEventDate.month,
+                            newEventDate.day,
+                          ),
+                        ),
+                        ..._eventsLocal,
+                      ];
                       titleCtl.clear();
                       setState(() {});
                     },
@@ -334,7 +389,7 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                 height: 220,
                 child: ListView.separated(
                   itemBuilder: (_, i) {
-                    final list = widget.events
+                    final list = _eventsLocal
                         .where(
                           (e) => q.isEmpty || e.title.toLowerCase().contains(q),
                         )
@@ -375,6 +430,13 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                               );
                               if (t != null && t.trim().isNotEmpty) {
                                 await widget.onRenameEvent(e.id, t.trim());
+                                _eventsLocal = _eventsLocal
+                                    .map(
+                                      (ev) => ev.id == e.id
+                                          ? ev.copyWith(title: t.trim())
+                                          : ev,
+                                    )
+                                    .toList();
                                 setState(() {});
                               }
                             },
@@ -383,6 +445,9 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                           IconButton(
                             onPressed: () {
                               widget.onDeleteEvent(e.id);
+                              _eventsLocal = _eventsLocal
+                                  .where((ev) => ev.id != e.id)
+                                  .toList();
                               setState(() {});
                             },
                             icon: const Icon(Icons.delete),
@@ -392,7 +457,7 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                     );
                   },
                   separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemCount: widget.events
+                  itemCount: _eventsLocal
                       .where(
                         (e) => q.isEmpty || e.title.toLowerCase().contains(q),
                       )
@@ -412,8 +477,9 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                     width: 170,
                     child: _NumField(
                       label: 'Morning window (h)',
-                      value: widget.surgeMorningWindowHours,
+                      value: _surgeMorningWindowHours,
                       onChanged: (v) {
+                        _surgeMorningWindowHours = v;
                         widget.onSurgeChange(morning: v);
                         setState(() {});
                       },
@@ -423,8 +489,9 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                     width: 170,
                     child: _NumField(
                       label: 'Trough window (h)',
-                      value: widget.surgeTroughWindowHours,
+                      value: _surgeTroughWindowHours,
                       onChanged: (v) {
+                        _surgeTroughWindowHours = v;
                         widget.onSurgeChange(trough: v);
                         setState(() {});
                       },
@@ -434,8 +501,9 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                     width: 170,
                     child: _NumField(
                       label: 'Prewaking (h)',
-                      value: widget.surgePrewakeHours,
+                      value: _surgePrewakeHours,
                       onChanged: (v) {
+                        _surgePrewakeHours = v;
                         widget.onSurgeChange(prewake: v);
                         setState(() {});
                       },
@@ -452,8 +520,9 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                     width: 170,
                     child: _NumField(
                       label: 'HR rise threshold (bpm)',
-                      value: widget.surgeHrRiseBpm,
+                      value: _surgeHrRiseBpm,
                       onChanged: (v) {
+                        _surgeHrRiseBpm = v;
                         widget.onSurgeChange(hrRise: v);
                         setState(() {});
                       },
@@ -463,8 +532,9 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                     width: 170,
                     child: _NumField(
                       label: 'Steps in 30 min',
-                      value: widget.surgeSteps30Min,
+                      value: _surgeSteps30Min,
                       onChanged: (v) {
+                        _surgeSteps30Min = v;
                         widget.onSurgeChange(steps30: v);
                         setState(() {});
                       },
@@ -481,8 +551,9 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                     width: 170,
                     child: _NumField(
                       label: 'Wake earliest hr',
-                      value: widget.surgeWakeEarliestHour,
+                      value: _surgeWakeEarliestHour,
                       onChanged: (v) {
+                        _surgeWakeEarliestHour = v;
                         widget.onSurgeChange(earliest: v);
                         setState(() {});
                       },
@@ -492,8 +563,9 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                     width: 170,
                     child: _NumField(
                       label: 'Wake latest hr',
-                      value: widget.surgeWakeLatestHour,
+                      value: _surgeWakeLatestHour,
                       onChanged: (v) {
+                        _surgeWakeLatestHour = v;
                         widget.onSurgeChange(latest: v);
                         setState(() {});
                       },
@@ -507,8 +579,9 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                   const Text('Bands'),
                   const SizedBox(width: 6),
                   Switch(
-                    value: widget.showBands,
+                    value: _showBands,
                     onChanged: (v) {
+                      _showBands = v;
                       widget.onShowBands(v);
                       setState(() {});
                     },
@@ -520,8 +593,9 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                   const Text('Anchor to dose'),
                   const SizedBox(width: 6),
                   Switch(
-                    value: widget.anchorToDose,
+                    value: _anchorToDose,
                     onChanged: (v) {
+                      _anchorToDose = v;
                       widget.onAnchorToDose(v);
                       setState(() {});
                     },
@@ -529,25 +603,26 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
                 ],
               ),
               OutlinedButton.icon(
-                onPressed: !widget.anchorToDose
+                onPressed: !_anchorToDose
                     ? null
                     : () async {
                         final picked = await showTimePicker(
                           context: context,
                           initialTime:
-                              widget.doseTime ??
+                              _doseTimeLocal ??
                               const TimeOfDay(hour: 8, minute: 0),
                         );
                         if (picked != null) {
+                          _doseTimeLocal = picked;
                           widget.onDoseTimeChanged(picked);
                           setState(() {});
                         }
                       },
                 icon: const Icon(Icons.medication),
                 label: Text(
-                  widget.doseTime == null
+                  _doseTimeLocal == null
                       ? 'Dose time'
-                      : '${widget.doseTime!.hour.toString().padLeft(2, '0')}:${widget.doseTime!.minute.toString().padLeft(2, '0')}',
+                      : '${_doseTimeLocal!.hour.toString().padLeft(2, '0')}:${_doseTimeLocal!.minute.toString().padLeft(2, '0')}',
                 ),
               ),
             ],
