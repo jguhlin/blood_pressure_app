@@ -101,35 +101,28 @@ class _AdvancedSettingsSheetState extends State<AdvancedSettingsSheet> {
               ),
               const SizedBox(height: 12),
               const Text('Trend Smoother'),
-              Row(
-                children: [
-                  Expanded(
-                    child: RadioListTile<String>(
-                      title: const Text('Moving Average'),
-                      value: 'ma',
-                      // ignore: deprecated_member_use
-                      groupValue: widget.trendSmoothMethod,
-                      // ignore: deprecated_member_use
-                      onChanged: (v) {
-                        if (v != null) widget.onTrendSmoothMethod(v);
-                        setState(() {});
-                      },
+              RadioGroup<String>(
+                groupValue: widget.trendSmoothMethod,
+                onChanged: (v) {
+                  if (v != null) widget.onTrendSmoothMethod(v);
+                  setState(() {});
+                },
+                child: Row(
+                  children: const [
+                    Expanded(
+                      child: RadioListTile<String>(
+                        title: Text('Moving Average'),
+                        value: 'ma',
+                      ),
                     ),
-                  ),
-                  Expanded(
-                    child: RadioListTile<String>(
-                      title: const Text('EMA'),
-                      value: 'ema',
-                      // ignore: deprecated_member_use
-                      groupValue: widget.trendSmoothMethod,
-                      // ignore: deprecated_member_use
-                      onChanged: (v) {
-                        if (v != null) widget.onTrendSmoothMethod(v);
-                        setState(() {});
-                      },
+                    Expanded(
+                      child: RadioListTile<String>(
+                        title: Text('EMA'),
+                        value: 'ema',
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
               Row(
                 children: [
