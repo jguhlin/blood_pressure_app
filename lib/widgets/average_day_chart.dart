@@ -11,6 +11,7 @@ class AverageDayChart extends StatelessWidget {
   final bool showBands;
   final bool showSys;
   final bool showDia;
+  final bool distribution; // median + IQR band per bin across days
   final List<ChartSecSample> secondarySamples;
   final String secondaryLabel;
   const AverageDayChart({
@@ -20,6 +21,7 @@ class AverageDayChart extends StatelessWidget {
     this.showBands = false,
     this.showSys = true,
     this.showDia = true,
+    this.distribution = false,
     this.secondarySamples = const [],
     this.secondaryLabel = '',
   });
@@ -39,12 +41,24 @@ class AverageDayChart extends StatelessWidget {
         );
     final sysSpots = <FlSpot>[];
     final diaSpots = <FlSpot>[];
+    final sysQ50 = <FlSpot>[];
+    final sysQ25 = <FlSpot>[];
+    final sysQ75 = <FlSpot>[];
+    final diaQ50 = <FlSpot>[];
+    final diaQ25 = <FlSpot>[];
+    final diaQ75 = <FlSpot>[];
     for (int i = 0; i < agg.minutes.length; i++) {
       final x = agg.minutes[i] / 60.0; // hours
       final s = agg.sysMean[i];
       final d = agg.diaMean[i];
       if (s != null) sysSpots.add(FlSpot(x, s));
       if (d != null) diaSpots.add(FlSpot(x, d));
+      if (agg.sysQ50?[i] != null) sysQ50.add(FlSpot(x, agg.sysQ50![i]!));
+      if (agg.sysQ25?[i] != null) sysQ25.add(FlSpot(x, agg.sysQ25![i]!));
+      if (agg.sysQ75?[i] != null) sysQ75.add(FlSpot(x, agg.sysQ75![i]!));
+      if (agg.diaQ50?[i] != null) diaQ50.add(FlSpot(x, agg.diaQ50![i]!));
+      if (agg.diaQ25?[i] != null) diaQ25.add(FlSpot(x, agg.diaQ25![i]!));
+      if (agg.diaQ75?[i] != null) diaQ75.add(FlSpot(x, agg.diaQ75![i]!));
     }
     final sysLower = <FlSpot>[];
     final sysUpper = <FlSpot>[];
@@ -101,7 +115,7 @@ class AverageDayChart extends StatelessWidget {
         ),
       ]);
     }
-    if (showSys) {
+    if (!distribution && showSys) {
       bars.add(
         LineChartBarData(
           spots: sysSpots,
@@ -113,7 +127,7 @@ class AverageDayChart extends StatelessWidget {
         ),
       );
     }
-    if (showDia) {
+    if (!distribution && showDia) {
       bars.add(
         LineChartBarData(
           spots: diaSpots,
@@ -124,6 +138,84 @@ class AverageDayChart extends StatelessWidget {
           dotData: const FlDotData(show: false),
         ),
       );
+    }
+
+    // Distribution mode: IQR bands and median lines
+    if (distribution) {
+      if (showSys && sysQ50.isNotEmpty) {
+        if (sysQ25.isNotEmpty && sysQ75.isNotEmpty) {
+          bars.addAll([
+            LineChartBarData(
+              spots: sysQ25,
+              isCurved: true,
+              color: Colors.transparent,
+              barWidth: 0,
+              dotData: const FlDotData(show: false),
+            ),
+            LineChartBarData(
+              spots: sysQ75,
+              isCurved: true,
+              color: Colors.transparent,
+              barWidth: 0,
+              dotData: const FlDotData(show: false),
+            ),
+            LineChartBarData(
+              spots: sysQ50,
+              isCurved: true,
+              color: Colors.red,
+              barWidth: 2,
+              dotData: const FlDotData(show: false),
+            ),
+          ]);
+        } else {
+          bars.add(
+            LineChartBarData(
+              spots: sysQ50,
+              isCurved: true,
+              color: Colors.red,
+              barWidth: 2,
+              dotData: const FlDotData(show: false),
+            ),
+          );
+        }
+      }
+      if (showDia && diaQ50.isNotEmpty) {
+        if (diaQ25.isNotEmpty && diaQ75.isNotEmpty) {
+          bars.addAll([
+            LineChartBarData(
+              spots: diaQ25,
+              isCurved: true,
+              color: Colors.transparent,
+              barWidth: 0,
+              dotData: const FlDotData(show: false),
+            ),
+            LineChartBarData(
+              spots: diaQ75,
+              isCurved: true,
+              color: Colors.transparent,
+              barWidth: 0,
+              dotData: const FlDotData(show: false),
+            ),
+            LineChartBarData(
+              spots: diaQ50,
+              isCurved: true,
+              color: Colors.blue,
+              barWidth: 2,
+              dotData: const FlDotData(show: false),
+            ),
+          ]);
+        } else {
+          bars.add(
+            LineChartBarData(
+              spots: diaQ50,
+              isCurved: true,
+              color: Colors.blue,
+              barWidth: 2,
+              dotData: const FlDotData(show: false),
+            ),
+          );
+        }
+      }
     }
 
     // Secondary series mapping
@@ -281,8 +373,22 @@ class AverageDayChart extends StatelessWidget {
       }
     }
 
-    final minY = _autoMinY([if (showSys) sysSpots, if (showDia) diaSpots]) - 10;
-    final maxY = _autoMaxY([if (showSys) sysSpots, if (showDia) diaSpots]) + 10;
+    final minY =
+        _autoMinY([
+          if (!distribution && showSys) sysSpots,
+          if (!distribution && showDia) diaSpots,
+          if (distribution && showSys) sysQ25.isNotEmpty ? sysQ25 : sysQ50,
+          if (distribution && showDia) diaQ25.isNotEmpty ? diaQ25 : diaQ50,
+        ]) -
+        10;
+    final maxY =
+        _autoMaxY([
+          if (!distribution && showSys) sysSpots,
+          if (!distribution && showDia) diaSpots,
+          if (distribution && showSys) sysQ75.isNotEmpty ? sysQ75 : sysQ50,
+          if (distribution && showDia) diaQ75.isNotEmpty ? diaQ75 : diaQ50,
+        ]) +
+        10;
 
     final chart = LineChart(
       LineChartData(
@@ -329,16 +435,34 @@ class AverageDayChart extends StatelessWidget {
             ),
         ],
         betweenBarsData: [
-          if (showBands && sysLower.isNotEmpty && sysUpper.isNotEmpty)
+          if (!distribution &&
+              showBands &&
+              sysLower.isNotEmpty &&
+              sysUpper.isNotEmpty)
             BetweenBarsData(
               fromIndex: 0,
               toIndex: 1,
               color: const Color(0x26F44336),
             ),
-          if (showBands && diaLower.isNotEmpty && diaUpper.isNotEmpty)
+          if (!distribution &&
+              showBands &&
+              diaLower.isNotEmpty &&
+              diaUpper.isNotEmpty)
             BetweenBarsData(
               fromIndex: 2,
               toIndex: 3,
+              color: const Color(0x1F2196F3),
+            ),
+          if (distribution && showSys && sysQ25.isNotEmpty && sysQ75.isNotEmpty)
+            BetweenBarsData(
+              fromIndex: bars.length - (showDia ? 6 : 3),
+              toIndex: bars.length - (showDia ? 5 : 2),
+              color: const Color(0x26F44336),
+            ),
+          if (distribution && showDia && diaQ25.isNotEmpty && diaQ75.isNotEmpty)
+            BetweenBarsData(
+              fromIndex: bars.length - 3,
+              toIndex: bars.length - 2,
               color: const Color(0x1F2196F3),
             ),
         ],

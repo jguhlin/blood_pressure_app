@@ -4,6 +4,13 @@ class AvgDay {
   final List<int> minutes; // minutes since midnight
   final List<double?> sysMean; // smoothed means
   final List<double?> diaMean;
+  // Quantiles (smoothed across bins)
+  final List<double?>? sysQ50;
+  final List<double?>? sysQ25;
+  final List<double?>? sysQ75;
+  final List<double?>? diaQ50;
+  final List<double?>? diaQ25;
+  final List<double?>? diaQ75;
   final List<double?>? sysLower; // optional 95% CI lower
   final List<double?>? sysUpper;
   final List<double?>? diaLower;
@@ -12,6 +19,12 @@ class AvgDay {
     required this.minutes,
     required this.sysMean,
     required this.diaMean,
+    this.sysQ50,
+    this.sysQ25,
+    this.sysQ75,
+    this.diaQ50,
+    this.diaQ25,
+    this.diaQ75,
     this.sysLower,
     this.sysUpper,
     this.diaLower,
@@ -108,6 +121,38 @@ class AverageDayAggregator {
     final sysMean = avgOfDays(perDaySys);
     final diaMean = avgOfDays(perDayDia);
 
+    // Per-bin quantiles across days
+    List<double?> quantileOfDays(List<List<double?>> perDay, double q) {
+      final out = List<double?>.filled(bins, null);
+      for (int i = 0; i < bins; i++) {
+        final vals = <double>[];
+        for (final day in perDay) {
+          final v = day[i];
+          if (v != null) vals.add(v);
+        }
+        if (vals.isEmpty) continue;
+        vals.sort();
+        final pos = (vals.length - 1) * q;
+        final idx = pos.floor();
+        final frac = pos - idx;
+        double v;
+        if (idx + 1 < vals.length) {
+          v = vals[idx] * (1 - frac) + vals[idx + 1] * frac;
+        } else {
+          v = vals[idx];
+        }
+        out[i] = v;
+      }
+      return out;
+    }
+
+    var sysQ50 = quantileOfDays(perDaySys, 0.5);
+    var sysQ25 = quantileOfDays(perDaySys, 0.25);
+    var sysQ75 = quantileOfDays(perDaySys, 0.75);
+    var diaQ50 = quantileOfDays(perDayDia, 0.5);
+    var diaQ25 = quantileOfDays(perDayDia, 0.25);
+    var diaQ75 = quantileOfDays(perDayDia, 0.75);
+
     List<int> countOfDays(List<List<double?>> perDay) {
       final out = List<int>.filled(bins, 0);
       for (int i = 0; i < bins; i++) {
@@ -166,6 +211,13 @@ class AverageDayAggregator {
 
     final sysSmooth = smooth(sysMean);
     final diaSmooth = smooth(diaMean);
+    // Smooth quantiles as well
+    sysQ50 = smooth(sysQ50);
+    sysQ25 = smooth(sysQ25);
+    sysQ75 = smooth(sysQ75);
+    diaQ50 = smooth(diaQ50);
+    diaQ25 = smooth(diaQ25);
+    diaQ75 = smooth(diaQ75);
     if (withBands) {
       sysStd = smooth(sysStd);
       diaStd = smooth(diaStd);
@@ -198,6 +250,12 @@ class AverageDayAggregator {
       minutes: minutes,
       sysMean: sysSmooth,
       diaMean: diaSmooth,
+      sysQ50: sysQ50,
+      sysQ25: sysQ25,
+      sysQ75: sysQ75,
+      diaQ50: diaQ50,
+      diaQ25: diaQ25,
+      diaQ75: diaQ75,
       sysLower: withBands ? lower(sysSmooth, sysStd, sysN) : null,
       sysUpper: withBands ? upper(sysSmooth, sysStd, sysN) : null,
       diaLower: withBands ? lower(diaSmooth, diaStd, diaN) : null,

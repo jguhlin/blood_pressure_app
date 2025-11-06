@@ -64,6 +64,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
   bool _trendSmoothAuto = true; // tie window to range length
   String _secondMetric =
       'none'; // 'none','hr','resting_hr','hrv_sdnn','hrv_rmssd','steps','sleep','energy','workouts'
+  bool _avgDistribution = false; // Average Day distribution mode
   String _bpZoneScheme = 'acc_aha'; // 'acc_aha' (US) or 'esc_esh' (EU)
   // Surge heuristic settings (flexible)
   int _surgeMorningWindowHours = 2; // [wake, wake+X]
@@ -128,6 +129,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
     _trendTooltips = prefs.getBool('trend_tooltips') ?? _trendTooltips;
     _trendDistribution =
         prefs.getBool('trend_distribution') ?? _trendDistribution;
+    _avgDistribution = prefs.getBool('avg_distribution') ?? _avgDistribution;
     _secondMetric = prefs.getString('second_metric') ?? _secondMetric;
     _bpZoneScheme = prefs.getString('bp_zone_scheme') ?? _bpZoneScheme;
     _pdfIncludeBothCharts =
@@ -198,6 +200,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
     await prefs.setBool('trend_smooth_auto', _trendSmoothAuto);
     await prefs.setBool('trend_tooltips', _trendTooltips);
     await prefs.setBool('trend_distribution', _trendDistribution);
+    await prefs.setBool('avg_distribution', _avgDistribution);
     await prefs.setString('second_metric', _secondMetric);
     await prefs.setString('bp_zone_scheme', _bpZoneScheme);
     await prefs.setBool('pdf_include_both_charts', _pdfIncludeBothCharts);
@@ -1109,6 +1112,24 @@ class _LatestBPPageState extends State<LatestBPPage> {
                       ),
                     ],
                   ),
+                if (_mode == _ViewMode.averageDay)
+                  ToggleButtons(
+                    isSelected: [!_avgDistribution, _avgDistribution],
+                    onPressed: (i) {
+                      setState(() => _avgDistribution = (i == 1));
+                      _savePrefs();
+                    },
+                    children: const [
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 12),
+                        child: Text('Lines'),
+                      ),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 12),
+                        child: Text('Distribution'),
+                      ),
+                    ],
+                  ),
                 IconButton(
                   icon: const Icon(Icons.info_outline),
                   tooltip: 'Chart help',
@@ -1509,6 +1530,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
                               showBands: _showBands,
                               showSys: _showSys,
                               showDia: _showDia,
+                              distribution: _avgDistribution,
                               secondarySamples:
                                   (_secondMetric == 'resting_hr' ||
                                       _secondMetric == 'hr' ||
