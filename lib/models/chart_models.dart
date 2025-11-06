@@ -17,5 +17,11 @@ class ChartSecSample {
   final DateTime? start;
   final DateTime? end;
   final double? durMin;
-  const ChartSecSample({required this.t, required this.v, this.start, this.end, this.durMin});
+  const ChartSecSample({
+    required this.t,
+    required this.v,
+    this.start,
+    this.end,
+    this.durMin,
+  });
 }

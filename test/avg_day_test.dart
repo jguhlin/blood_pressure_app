@@ -8,11 +8,14 @@ void main() {
       avg.AvgBpInput(t: day.add(const Duration(hours: 8)), sbp: 120, dbp: 80),
       avg.AvgBpInput(t: day.add(const Duration(hours: 20)), sbp: 130, dbp: 85),
     ];
-    final aggNoAnchor = avg.AverageDayAggregator(series: series).compute(stepMinutes: 60, smoothMinutes: 1, anchorMinute: null);
-    final aggAnchor = avg.AverageDayAggregator(series: series).compute(stepMinutes: 60, smoothMinutes: 1, anchorMinute: 8*60);
+    final aggNoAnchor = avg.AverageDayAggregator(
+      series: series,
+    ).compute(stepMinutes: 60, smoothMinutes: 1, anchorMinute: null);
+    final aggAnchor = avg.AverageDayAggregator(
+      series: series,
+    ).compute(stepMinutes: 60, smoothMinutes: 1, anchorMinute: 8 * 60);
     // Expect same values present but shifted to 0 (since anchor at 08:00)
-    final i8 = aggNoAnchor.minutes.indexOf(8*60);
+    final i8 = aggNoAnchor.minutes.indexOf(8 * 60);
     expect(aggAnchor.sysMean.first, aggNoAnchor.sysMean[i8]);
   });
 }
-

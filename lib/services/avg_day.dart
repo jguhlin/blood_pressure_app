@@ -30,7 +30,12 @@ class AverageDayAggregator {
   final List<AvgBpInput> series;
   AverageDayAggregator({required this.series});
 
-  AvgDay compute({int stepMinutes = 15, int smoothMinutes = 45, int? anchorMinute, bool withBands = false}) {
+  AvgDay compute({
+    int stepMinutes = 15,
+    int smoothMinutes = 45,
+    int? anchorMinute,
+    bool withBands = false,
+  }) {
     final step = stepMinutes;
     final bins = (24 * 60) ~/ step;
     final days = <DateTime, _DayBins>{};
@@ -114,6 +119,7 @@ class AverageDayAggregator {
       }
       return out;
     }
+
     List<double?> stdOfDays(List<List<double?>> perDay, List<double?> mean) {
       final out = List<double?>.filled(bins, null);
       for (int i = 0; i < bins; i++) {
@@ -176,6 +182,7 @@ class AverageDayAggregator {
       }
       return out;
     }
+
     List<double?>? upper(List<double?> mean, List<double?> std, List<int> n) {
       final out = List<double?>.filled(mean.length, null);
       for (int i = 0; i < mean.length; i++) {
@@ -205,10 +212,10 @@ class _DayBins {
   final List<double> sysW;
   final List<double> diaW;
   _DayBins(int bins)
-      : sysSum = List.filled(bins, 0),
-        diaSum = List.filled(bins, 0),
-        sysW = List.filled(bins, 0),
-        diaW = List.filled(bins, 0);
+    : sysSum = List.filled(bins, 0),
+      diaSum = List.filled(bins, 0),
+      sysW = List.filled(bins, 0),
+      diaW = List.filled(bins, 0);
 }
 
 // No extra types exported beyond AvgBpInput/AvgDay

@@ -14,6 +14,9 @@ import 'package:flutter/rendering.dart';
 import 'services/metrics.dart' as met;
 import 'services/avg_day.dart' as avg;
 import 'models/chart_models.dart' as cm;
+import 'models/event.dart' as mdl;
+import 'widgets/advanced_settings_sheet.dart';
+import 'widgets/add_bp_sheet.dart';
 import 'widgets/trend_chart.dart';
 import 'widgets/average_day_chart.dart';
 import 'widgets/average_day_compare_chart.dart';
@@ -26,7 +29,9 @@ class BPApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Blood Pressure',
-      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.red)),
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.red),
+      ),
       home: const LatestBPPage(),
     );
   }
@@ -49,21 +54,23 @@ class _LatestBPPageState extends State<LatestBPPage> {
   // Series visibility and trend style
   bool _showSys = true;
   bool _showDia = true;
-  bool _trendDistribution = false; // false: lines/points, true: distribution band
+  bool _trendDistribution =
+      false; // false: lines/points, true: distribution band
   bool _trendTooltips = true; // tooltips for trend (esp. distribution medians)
   bool _trendSmoothing = false; // smooth daily quantiles in distribution view
   int _trendSmoothDays = 7; // odd window length in days for smoothing
   String _trendSmoothMethod = 'ma'; // 'ma' or 'ema'
   bool _trendSmoothAuto = true; // tie window to range length
-  String _secondMetric = 'none'; // 'none','hr','resting_hr','hrv_sdnn','hrv_rmssd','steps','sleep','energy','workouts'
+  String _secondMetric =
+      'none'; // 'none','hr','resting_hr','hrv_sdnn','hrv_rmssd','steps','sleep','energy','workouts'
   // Surge heuristic settings (flexible)
-  int _surgeMorningWindowHours = 2;     // [wake, wake+X]
-  int _surgeTroughWindowHours = 6;      // [wake-X, wake)
-  int _surgePrewakeHours = 2;           // [wake-X, wake)
-  int _surgeHrRiseBpm = 10;             // HR baseline+X bpm
-  int _surgeSteps30Min = 100;           // steps in 30 min threshold
-  int _surgeWakeEarliestHour = 3;       // earliest wake search hour
-  int _surgeWakeLatestHour = 11;        // latest wake search hour
+  int _surgeMorningWindowHours = 2; // [wake, wake+X]
+  int _surgeTroughWindowHours = 6; // [wake-X, wake)
+  int _surgePrewakeHours = 2; // [wake-X, wake)
+  int _surgeHrRiseBpm = 10; // HR baseline+X bpm
+  int _surgeSteps30Min = 100; // steps in 30 min threshold
+  int _surgeWakeEarliestHour = 3; // earliest wake search hour
+  int _surgeWakeLatestHour = 11; // latest wake search hour
   // Add-reading defaults
   String _bpBodyPosition = 'sitting'; // sitting, standing, supine
   String _bpArm = 'left_upper_arm'; // left_upper_arm, right_upper_arm, wrist
@@ -79,7 +86,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
   late DateTime _rangeStart;
   _ViewMode _mode = _ViewMode.trend;
   // PDF options
-  bool _pdfIncludeBothCharts = true; // default to embed both Trend + Average Day
+  bool _pdfIncludeBothCharts =
+      true; // default to embed both Trend + Average Day
   // Compare mode state
   DateTimeRange? _rangeA;
   DateTimeRange? _rangeB;
@@ -114,21 +122,28 @@ class _LatestBPPageState extends State<LatestBPPage> {
     final bEndIso = prefs.getString('rangeB_end');
     _trendSmoothing = prefs.getBool('trend_smoothing') ?? _trendSmoothing;
     _trendSmoothDays = prefs.getInt('trend_smooth_days') ?? _trendSmoothDays;
-    _trendSmoothMethod = prefs.getString('trend_smooth_method') ?? _trendSmoothMethod;
+    _trendSmoothMethod =
+        prefs.getString('trend_smooth_method') ?? _trendSmoothMethod;
     _trendSmoothAuto = prefs.getBool('trend_smooth_auto') ?? _trendSmoothAuto;
     _trendTooltips = prefs.getBool('trend_tooltips') ?? _trendTooltips;
-    _trendDistribution = prefs.getBool('trend_distribution') ?? _trendDistribution;
+    _trendDistribution =
+        prefs.getBool('trend_distribution') ?? _trendDistribution;
     _secondMetric = prefs.getString('second_metric') ?? _secondMetric;
     _bpBodyPosition = prefs.getString('bp_body_position') ?? _bpBodyPosition;
     _bpArm = prefs.getString('bp_arm') ?? _bpArm;
-    _pdfIncludeBothCharts = prefs.getBool('pdf_include_both_charts') ?? _pdfIncludeBothCharts;
-    _surgeMorningWindowHours = prefs.getInt('surge_morning_window_h') ?? _surgeMorningWindowHours;
-    _surgeTroughWindowHours = prefs.getInt('surge_trough_window_h') ?? _surgeTroughWindowHours;
+    _pdfIncludeBothCharts =
+        prefs.getBool('pdf_include_both_charts') ?? _pdfIncludeBothCharts;
+    _surgeMorningWindowHours =
+        prefs.getInt('surge_morning_window_h') ?? _surgeMorningWindowHours;
+    _surgeTroughWindowHours =
+        prefs.getInt('surge_trough_window_h') ?? _surgeTroughWindowHours;
     _surgePrewakeHours = prefs.getInt('surge_prewake_h') ?? _surgePrewakeHours;
     _surgeHrRiseBpm = prefs.getInt('surge_hr_rise_bpm') ?? _surgeHrRiseBpm;
     _surgeSteps30Min = prefs.getInt('surge_steps_30m') ?? _surgeSteps30Min;
-    _surgeWakeEarliestHour = prefs.getInt('surge_wake_earliest_h') ?? _surgeWakeEarliestHour;
-    _surgeWakeLatestHour = prefs.getInt('surge_wake_latest_h') ?? _surgeWakeLatestHour;
+    _surgeWakeEarliestHour =
+        prefs.getInt('surge_wake_earliest_h') ?? _surgeWakeEarliestHour;
+    _surgeWakeLatestHour =
+        prefs.getInt('surge_wake_latest_h') ?? _surgeWakeLatestHour;
     await _loadEvents(prefs);
     if (!mounted) return;
     setState(() {
@@ -145,12 +160,16 @@ class _LatestBPPageState extends State<LatestBPPage> {
       if (aStartIso != null && aEndIso != null) {
         final aS = DateTime.tryParse(aStartIso);
         final aE = DateTime.tryParse(aEndIso);
-        if (aS != null && aE != null) _rangeA = DateTimeRange(start: aS, end: aE);
+        if (aS != null && aE != null) {
+          _rangeA = DateTimeRange(start: aS, end: aE);
+        }
       }
       if (bStartIso != null && bEndIso != null) {
         final bS = DateTime.tryParse(bStartIso);
         final bE = DateTime.tryParse(bEndIso);
-        if (bS != null && bE != null) _rangeB = DateTimeRange(start: bS, end: bE);
+        if (bS != null && bE != null) {
+          _rangeB = DateTimeRange(start: bS, end: bE);
+        }
       }
     });
   }
@@ -227,7 +246,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
       // If nothing in last 30 days, try requesting history permission and extend window
       if (points.isEmpty) {
         try {
-          final histGranted = await _health.requestHealthDataHistoryAuthorization();
+          final histGranted = await _health
+              .requestHealthDataHistoryAuthorization();
           if (histGranted) {
             if (!_isCustomRange) {
               _rangeStart = _rangeEnd.subtract(const Duration(days: 365));
@@ -270,25 +290,49 @@ class _LatestBPPageState extends State<LatestBPPage> {
     }
   }
 
-  Future<List<cm.ChartSecPoint>> _fetchSecondary(DateTime start, DateTime end) async {
+  Future<List<cm.ChartSecPoint>> _fetchSecondary(
+    DateTime start,
+    DateTime end,
+  ) async {
     HealthDataType? t;
     switch (_secondMetric) {
-      case 'hr': t = HealthDataType.HEART_RATE; break;
-      case 'resting_hr': t = HealthDataType.RESTING_HEART_RATE; break;
-      case 'hrv_sdnn': t = HealthDataType.HEART_RATE_VARIABILITY_SDNN; break;
-      case 'hrv_rmssd': t = HealthDataType.HEART_RATE_VARIABILITY_RMSSD; break;
-      case 'steps': t = HealthDataType.STEPS; break;
-      case 'sleep': t = HealthDataType.SLEEP_ASLEEP; break;
-      case 'energy': t = HealthDataType.ACTIVE_ENERGY_BURNED; break;
-      case 'workouts': t = null; break; // special handling below
-      default: return const [];
+      case 'hr':
+        t = HealthDataType.HEART_RATE;
+        break;
+      case 'resting_hr':
+        t = HealthDataType.RESTING_HEART_RATE;
+        break;
+      case 'hrv_sdnn':
+        t = HealthDataType.HEART_RATE_VARIABILITY_SDNN;
+        break;
+      case 'hrv_rmssd':
+        t = HealthDataType.HEART_RATE_VARIABILITY_RMSSD;
+        break;
+      case 'steps':
+        t = HealthDataType.STEPS;
+        break;
+      case 'sleep':
+        t = HealthDataType.SLEEP_ASLEEP;
+        break;
+      case 'energy':
+        t = HealthDataType.ACTIVE_ENERGY_BURNED;
+        break;
+      case 'workouts':
+        t = null;
+        break; // special handling below
+      default:
+        return const [];
     }
     try {
       if (_secondMetric == 'workouts') {
         // Prefer EXERCISE_TIME; if unavailable, fall back to WORKOUT durations.
         final byDayMin = <DateTime, double>{};
         try {
-          final ex = await _health.getHealthDataFromTypes(types: [HealthDataType.EXERCISE_TIME], startTime: start, endTime: end);
+          final ex = await _health.getHealthDataFromTypes(
+            types: [HealthDataType.EXERCISE_TIME],
+            startTime: start,
+            endTime: end,
+          );
           for (final p in ex) {
             final day = DateTime(p.dateTo.year, p.dateTo.month, p.dateTo.day);
             final v = _toDouble(p.value) ?? 0;
@@ -297,7 +341,11 @@ class _LatestBPPageState extends State<LatestBPPage> {
         } catch (_) {}
         if (byDayMin.isEmpty) {
           try {
-            final ws = await _health.getHealthDataFromTypes(types: [HealthDataType.WORKOUT], startTime: start, endTime: end);
+            final ws = await _health.getHealthDataFromTypes(
+              types: [HealthDataType.WORKOUT],
+              startTime: start,
+              endTime: end,
+            );
             for (final p in ws) {
               final day = DateTime(p.dateTo.year, p.dateTo.month, p.dateTo.day);
               final mins = p.dateTo.difference(p.dateFrom).inMinutes.toDouble();
@@ -309,11 +357,15 @@ class _LatestBPPageState extends State<LatestBPPage> {
         for (final e in byDayMin.entries) {
           out.add(cm.ChartSecPoint(date: e.key, value: e.value));
         }
-        out.sort((a,b)=>a.date.compareTo(b.date));
+        out.sort((a, b) => a.date.compareTo(b.date));
         return out;
       }
 
-      final pts = await _health.getHealthDataFromTypes(types: [t!], startTime: start, endTime: end);
+      final pts = await _health.getHealthDataFromTypes(
+        types: [t!],
+        startTime: start,
+        endTime: end,
+      );
       final byDay = <DateTime, List<double>>{};
       for (final p in pts) {
         final day = DateTime(p.dateTo.year, p.dateTo.month, p.dateTo.day);
@@ -329,31 +381,54 @@ class _LatestBPPageState extends State<LatestBPPage> {
       final out = <cm.ChartSecPoint>[];
       for (final e in byDay.entries) {
         final vals = e.value;
-        final agg = (_secondMetric == 'steps' || _secondMetric == 'sleep' || _secondMetric == 'energy')
-            ? vals.fold(0.0, (a,b)=>a+b)
-            : (vals.reduce((a,b)=>a+b)/vals.length);
+        final agg =
+            (_secondMetric == 'steps' ||
+                _secondMetric == 'sleep' ||
+                _secondMetric == 'energy')
+            ? vals.fold(0.0, (a, b) => a + b)
+            : (vals.reduce((a, b) => a + b) / vals.length);
         out.add(cm.ChartSecPoint(date: e.key, value: agg));
       }
-      out.sort((a,b)=>a.date.compareTo(b.date));
+      out.sort((a, b) => a.date.compareTo(b.date));
       return out;
     } catch (_) {
       return const [];
     }
   }
 
-  Future<List<cm.ChartSecSample>> _fetchSecondarySeries(DateTime start, DateTime end) async {
+  Future<List<cm.ChartSecSample>> _fetchSecondarySeries(
+    DateTime start,
+    DateTime end,
+  ) async {
     HealthDataType? t;
     switch (_secondMetric) {
-      case 'hr': t = HealthDataType.HEART_RATE; break;
-      case 'resting_hr': t = HealthDataType.RESTING_HEART_RATE; break;
-      case 'hrv_sdnn': t = HealthDataType.HEART_RATE_VARIABILITY_SDNN; break;
-      case 'hrv_rmssd': t = HealthDataType.HEART_RATE_VARIABILITY_RMSSD; break;
-      case 'steps': t = HealthDataType.STEPS; break;
-      case 'sleep': t = HealthDataType.SLEEP_ASLEEP; break;
-      default: return const [];
+      case 'hr':
+        t = HealthDataType.HEART_RATE;
+        break;
+      case 'resting_hr':
+        t = HealthDataType.RESTING_HEART_RATE;
+        break;
+      case 'hrv_sdnn':
+        t = HealthDataType.HEART_RATE_VARIABILITY_SDNN;
+        break;
+      case 'hrv_rmssd':
+        t = HealthDataType.HEART_RATE_VARIABILITY_RMSSD;
+        break;
+      case 'steps':
+        t = HealthDataType.STEPS;
+        break;
+      case 'sleep':
+        t = HealthDataType.SLEEP_ASLEEP;
+        break;
+      default:
+        return const [];
     }
     try {
-      final pts = await _health.getHealthDataFromTypes(types: [t], startTime: start, endTime: end);
+      final pts = await _health.getHealthDataFromTypes(
+        types: [t],
+        startTime: start,
+        endTime: end,
+      );
       final out = <cm.ChartSecSample>[];
       for (final p in pts) {
         double? v = _toDouble(p.value);
@@ -363,11 +438,21 @@ class _LatestBPPageState extends State<LatestBPPage> {
           v ??= 1.0; // any value; we'll use duration for fraction
         }
         if (v == null) continue;
-        out.add(cm.ChartSecSample(t: p.dateTo, v: v, start: p.dateFrom, end: p.dateTo, durMin: durMin));
+        out.add(
+          cm.ChartSecSample(
+            t: p.dateTo,
+            v: v,
+            start: p.dateFrom,
+            end: p.dateTo,
+            durMin: durMin,
+          ),
+        );
       }
-      out.sort((a,b)=>a.t.compareTo(b.t));
+      out.sort((a, b) => a.t.compareTo(b.t));
       return out;
-    } catch (_) { return const []; }
+    } catch (_) {
+      return const [];
+    }
   }
 
   Future<bool> _ensurePermissions() async {
@@ -380,9 +465,13 @@ class _LatestBPPageState extends State<LatestBPPage> {
       HealthDataAccess.READ,
       HealthDataAccess.READ,
     ];
-    final hasPerm = await _health.hasPermissions(types, permissions: permissions) ?? false;
+    final hasPerm =
+        await _health.hasPermissions(types, permissions: permissions) ?? false;
     if (!hasPerm) {
-      final granted = await _health.requestAuthorization(types, permissions: permissions);
+      final granted = await _health.requestAuthorization(
+        types,
+        permissions: permissions,
+      );
       if (!granted) return false;
     }
     return true;
@@ -426,7 +515,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
       );
       if (pointsA.isEmpty) {
         try {
-          final histGranted = await _health.requestHealthDataHistoryAuthorization();
+          final histGranted = await _health
+              .requestHealthDataHistoryAuthorization();
           if (histGranted) {
             pointsA = await _health.getHealthDataFromTypes(
               types: types,
@@ -446,7 +536,8 @@ class _LatestBPPageState extends State<LatestBPPage> {
       );
       if (pointsB.isEmpty) {
         try {
-          final histGranted = await _health.requestHealthDataHistoryAuthorization();
+          final histGranted = await _health
+              .requestHealthDataHistoryAuthorization();
           if (histGranted) {
             pointsB = await _health.getHealthDataFromTypes(
               types: types,
@@ -490,8 +581,14 @@ class _LatestBPPageState extends State<LatestBPPage> {
     if (_listLoadingMore || _rangeA == null || _rangeB == null) return;
     setState(() => _listLoadingMore = true);
     try {
-      _rangeA = DateTimeRange(start: _rangeA!.start.subtract(const Duration(days: 90)), end: _rangeA!.end);
-      _rangeB = DateTimeRange(start: _rangeB!.start.subtract(const Duration(days: 90)), end: _rangeB!.end);
+      _rangeA = DateTimeRange(
+        start: _rangeA!.start.subtract(const Duration(days: 90)),
+        end: _rangeA!.end,
+      );
+      _rangeB = DateTimeRange(
+        start: _rangeB!.start.subtract(const Duration(days: 90)),
+        end: _rangeB!.end,
+      );
       await _savePrefs();
       await _fetchCompare();
       setState(() => _listLimit += 100);
@@ -508,34 +605,57 @@ class _LatestBPPageState extends State<LatestBPPage> {
     for (final s in json) {
       try {
         final m = Map<String, dynamic>.from(jsonDecode(s) as Map);
-        list.add(_Event(
-          id: m['id'] as String,
-          title: m['title'] as String,
-          date: DateTime.parse(m['date'] as String),
-        ));
+        list.add(
+          _Event(
+            id: m['id'] as String,
+            title: m['title'] as String,
+            date: DateTime.parse(m['date'] as String),
+          ),
+        );
       } catch (_) {}
     }
-    _events = list..sort((a,b)=>b.date.compareTo(a.date));
+    _events = list..sort((a, b) => b.date.compareTo(a.date));
   }
 
   Future<void> _saveEvents(SharedPreferences prefs) async {
-    final strs = _events.map((e) => jsonEncode({'id': e.id, 'title': e.title, 'date': e.date.toIso8601String()})).toList();
+    final strs = _events
+        .map(
+          (e) => jsonEncode({
+            'id': e.id,
+            'title': e.title,
+            'date': e.date.toIso8601String(),
+          }),
+        )
+        .toList();
     await prefs.setStringList('events_json', strs);
   }
 
   Future<void> _addEvent(String title, DateTime date) async {
-    final e = _Event(id: 'evt_${DateTime.now().microsecondsSinceEpoch}', title: title, date: DateTime(date.year, date.month, date.day));
-    setState(() => _events = [e, ..._events]..sort((a,b)=>b.date.compareTo(a.date)));
+    final e = _Event(
+      id: 'evt_${DateTime.now().microsecondsSinceEpoch}',
+      title: title,
+      date: DateTime(date.year, date.month, date.day),
+    );
+    setState(
+      () => _events = [e, ..._events]..sort((a, b) => b.date.compareTo(a.date)),
+    );
     await _savePrefs();
   }
+
   Future<void> _renameEvent(String id, String title) async {
-    setState(() => _events = _events.map((e)=> e.id==id? e.copyWith(title: title): e).toList());
+    setState(
+      () => _events = _events
+          .map((e) => e.id == id ? e.copyWith(title: title) : e)
+          .toList(),
+    );
     await _savePrefs();
   }
+
   Future<void> _deleteEvent(String id) async {
-    setState(() => _events = _events.where((e)=>e.id!=id).toList());
+    setState(() => _events = _events.where((e) => e.id != id).toList());
     await _savePrefs();
   }
+
   Future<void> _setRangeFromEvent(_Event e) async {
     setState(() {
       _isCustomRange = true;
@@ -545,15 +665,31 @@ class _LatestBPPageState extends State<LatestBPPage> {
     await _savePrefs();
     await _fetchData();
   }
+
   Future<void> _setRangeAFromEvent(_Event e) async {
     setState(() {
-      _rangeA = DateTimeRange(start: DateTime(e.date.year,e.date.month,e.date.day), end: DateTime(e.date.year,e.date.month,e.date.day).add(Duration(days: _rangeDays)));
+      _rangeA = DateTimeRange(
+        start: DateTime(e.date.year, e.date.month, e.date.day),
+        end: DateTime(
+          e.date.year,
+          e.date.month,
+          e.date.day,
+        ).add(Duration(days: _rangeDays)),
+      );
     });
     await _savePrefs();
   }
+
   Future<void> _setRangeBFromEvent(_Event e) async {
     setState(() {
-      _rangeB = DateTimeRange(start: DateTime(e.date.year,e.date.month,e.date.day), end: DateTime(e.date.year,e.date.month,e.date.day).add(Duration(days: _rangeDays)));
+      _rangeB = DateTimeRange(
+        start: DateTime(e.date.year, e.date.month, e.date.day),
+        end: DateTime(
+          e.date.year,
+          e.date.month,
+          e.date.day,
+        ).add(Duration(days: _rangeDays)),
+      );
     });
     await _savePrefs();
   }
@@ -582,35 +718,44 @@ class _LatestBPPageState extends State<LatestBPPage> {
       HealthDataPoint? d;
       if (idx != null) {
         d = diastolic[idx];
-        if ((d.dateTo.difference(s.dateTo)).abs() <= const Duration(minutes: 10)) {
+        if ((d.dateTo.difference(s.dateTo)).abs() <=
+            const Duration(minutes: 10)) {
           usedDia.add(idx);
         } else {
           d = null;
         }
       }
-      entries.add(_BPEntry(
-        timestamp: s.dateTo,
-        systolic: _toDouble(s.value),
-        diastolic: _toDouble(d?.value),
-        source: s.sourceId,
-      ));
+      entries.add(
+        _BPEntry(
+          timestamp: s.dateTo,
+          systolic: _toDouble(s.value),
+          diastolic: _toDouble(d?.value),
+          source: s.sourceId,
+        ),
+      );
     }
     for (int i = 0; i < diastolic.length; i++) {
       if (usedDia.contains(i)) continue;
       final d = diastolic[i];
-      entries.add(_BPEntry(
-        timestamp: d.dateTo,
-        systolic: null,
-        diastolic: _toDouble(d.value),
-        source: d.sourceId,
-      ));
+      entries.add(
+        _BPEntry(
+          timestamp: d.dateTo,
+          systolic: null,
+          diastolic: _toDouble(d.value),
+          source: d.sourceId,
+        ),
+      );
     }
 
     entries.sort((a, b) => a.timestamp!.compareTo(b.timestamp!));
     return entries;
   }
 
-  int? _closestIndex(List<HealthDataPoint> list, DateTime t, {Set<int>? exclude}) {
+  int? _closestIndex(
+    List<HealthDataPoint> list,
+    DateTime t, {
+    Set<int>? exclude,
+  }) {
     if (list.isEmpty) return null;
     int? best;
     var bestDelta = const Duration(days: 365);
@@ -648,7 +793,6 @@ class _LatestBPPageState extends State<LatestBPPage> {
       return null;
     }
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -703,20 +847,27 @@ class _LatestBPPageState extends State<LatestBPPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Health permissions are required to read blood pressure.', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const Text(
+                        'Health permissions are required to read blood pressure.',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
                       const SizedBox(height: 8),
-                      Wrap(spacing: 8, runSpacing: 8, children: [
-                        ElevatedButton.icon(
-                          onPressed: _requestPermsManually,
-                          icon: const Icon(Icons.verified_user),
-                          label: const Text('Grant in app'),
-                        ),
-                        OutlinedButton.icon(
-                          onPressed: _openHealthConnectSettings,
-                          icon: const Icon(Icons.settings),
-                          label: const Text('Open Health Connect'),
-                        ),
-                      ]),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          ElevatedButton.icon(
+                            onPressed: _requestPermsManually,
+                            icon: const Icon(Icons.verified_user),
+                            label: const Text('Grant in app'),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: _openHealthConnectSettings,
+                            icon: const Icon(Icons.settings),
+                            label: const Text('Open Health Connect'),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                 ),
@@ -734,18 +885,31 @@ class _LatestBPPageState extends State<LatestBPPage> {
                       _rangeDays == 90 && !_isCustomRange,
                     ],
                     onPressed: (i) {
-                      final days = i == 0 ? 7 : i == 1 ? 30 : 90;
-                    setState(() {
-                      _isCustomRange = false;
-                      _rangeDays = days;
-                    });
-                    _savePrefs();
-                    _fetchData();
-                  },
+                      final days = i == 0
+                          ? 7
+                          : i == 1
+                          ? 30
+                          : 90;
+                      setState(() {
+                        _isCustomRange = false;
+                        _rangeDays = days;
+                      });
+                      _savePrefs();
+                      _fetchData();
+                    },
                     children: const [
-                      Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('7d')),
-                      Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('30d')),
-                      Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('90d')),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 12),
+                        child: Text('7d'),
+                      ),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 12),
+                        child: Text('30d'),
+                      ),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 12),
+                        child: Text('90d'),
+                      ),
                     ],
                   ),
                   const SizedBox(width: 8),
@@ -753,20 +917,36 @@ class _LatestBPPageState extends State<LatestBPPage> {
                     onPressed: () async {
                       final picked = await showDateRangePicker(
                         context: context,
-                        firstDate: DateTime.now().subtract(const Duration(days: 365 * 5)),
+                        firstDate: DateTime.now().subtract(
+                          const Duration(days: 365 * 5),
+                        ),
                         lastDate: DateTime.now(),
-                        initialDateRange: DateTimeRange(start: _rangeStart, end: _rangeEnd),
+                        initialDateRange: DateTimeRange(
+                          start: _rangeStart,
+                          end: _rangeEnd,
+                        ),
                       );
                       if (picked != null) {
-                      setState(() {
-                        _isCustomRange = true;
-                        _rangeStart = DateTime(picked.start.year, picked.start.month, picked.start.day);
-                        _rangeEnd = DateTime(picked.end.year, picked.end.month, picked.end.day, 23, 59, 59);
-                      });
-                      _savePrefs();
-                      _fetchData();
-                    }
-                  },
+                        setState(() {
+                          _isCustomRange = true;
+                          _rangeStart = DateTime(
+                            picked.start.year,
+                            picked.start.month,
+                            picked.start.day,
+                          );
+                          _rangeEnd = DateTime(
+                            picked.end.year,
+                            picked.end.month,
+                            picked.end.day,
+                            23,
+                            59,
+                            59,
+                          );
+                        });
+                        _savePrefs();
+                        _fetchData();
+                      }
+                    },
                     icon: const Icon(Icons.date_range, size: 18),
                     label: Text(_isCustomRange ? 'Custom' : 'Custom...'),
                   ),
@@ -782,9 +962,18 @@ class _LatestBPPageState extends State<LatestBPPage> {
                     onPressed: () async {
                       final picked = await showDateRangePicker(
                         context: context,
-                        firstDate: DateTime.now().subtract(const Duration(days: 365 * 5)),
+                        firstDate: DateTime.now().subtract(
+                          const Duration(days: 365 * 5),
+                        ),
                         lastDate: DateTime.now(),
-                        initialDateRange: _rangeA ?? DateTimeRange(start: DateTime.now().subtract(const Duration(days: 7)), end: DateTime.now()),
+                        initialDateRange:
+                            _rangeA ??
+                            DateTimeRange(
+                              start: DateTime.now().subtract(
+                                const Duration(days: 7),
+                              ),
+                              end: DateTime.now(),
+                            ),
                       );
                       if (picked != null) {
                         setState(() => _rangeA = picked);
@@ -792,16 +981,29 @@ class _LatestBPPageState extends State<LatestBPPage> {
                       }
                     },
                     icon: const Icon(Icons.looks_one, size: 18),
-                    label: Text(_rangeA == null ? 'Pick Range A' : _labelRange('A', _rangeA!)),
+                    label: Text(
+                      _rangeA == null
+                          ? 'Pick Range A'
+                          : _labelRange('A', _rangeA!),
+                    ),
                   ),
                   const SizedBox(width: 8),
                   OutlinedButton.icon(
                     onPressed: () async {
                       final picked = await showDateRangePicker(
                         context: context,
-                        firstDate: DateTime.now().subtract(const Duration(days: 365 * 5)),
+                        firstDate: DateTime.now().subtract(
+                          const Duration(days: 365 * 5),
+                        ),
                         lastDate: DateTime.now(),
-                        initialDateRange: _rangeB ?? DateTimeRange(start: DateTime.now().subtract(const Duration(days: 30)), end: DateTime.now()),
+                        initialDateRange:
+                            _rangeB ??
+                            DateTimeRange(
+                              start: DateTime.now().subtract(
+                                const Duration(days: 30),
+                              ),
+                              end: DateTime.now(),
+                            ),
                       );
                       if (picked != null) {
                         setState(() => _rangeB = picked);
@@ -809,20 +1011,26 @@ class _LatestBPPageState extends State<LatestBPPage> {
                       }
                     },
                     icon: const Icon(Icons.looks_two, size: 18),
-                    label: Text(_rangeB == null ? 'Pick Range B' : _labelRange('B', _rangeB!)),
+                    label: Text(
+                      _rangeB == null
+                          ? 'Pick Range B'
+                          : _labelRange('B', _rangeB!),
+                    ),
                   ),
                   ElevatedButton.icon(
-                    onPressed: (_rangeA != null && _rangeB != null && !_loading) ? _fetchCompare : null,
+                    onPressed: (_rangeA != null && _rangeB != null && !_loading)
+                        ? _fetchCompare
+                        : null,
                     icon: const Icon(Icons.play_arrow, size: 18),
                     label: const Text('Fetch'),
                   ),
                 ],
               ),
             const SizedBox(height: 12),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 const Text('View:'),
                 ToggleButtons(
@@ -832,115 +1040,191 @@ class _LatestBPPageState extends State<LatestBPPage> {
                     _mode == _ViewMode.compare,
                   ],
                   onPressed: (i) {
-                    setState(() => _mode = i == 0
-                        ? _ViewMode.trend
-                        : i == 1
-                            ? _ViewMode.averageDay
-                            : _ViewMode.compare);
+                    setState(
+                      () => _mode = i == 0
+                          ? _ViewMode.trend
+                          : i == 1
+                          ? _ViewMode.averageDay
+                          : _ViewMode.compare,
+                    );
                   },
                   children: const [
-                    Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('Trend')),
-                    Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('Average Day')),
-                    Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('Compare')),
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: Text('Trend'),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: Text('Average Day'),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: Text('Compare'),
+                    ),
                   ],
                 ),
                 if (_mode == _ViewMode.trend)
                   ToggleButtons(
                     isSelected: [!_trendDistribution, _trendDistribution],
-                    onPressed: (i) { setState(() => _trendDistribution = (i == 1)); _savePrefs(); },
-                    children: const [
-                      Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('Lines')),
-                      Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('Distribution')),
-                    ],
-                  ),
-                IconButton(icon: const Icon(Icons.info_outline), tooltip: 'Chart help', onPressed: _showHelp),
-                // Secondary axis selector (Trend only)
-                if (_mode == _ViewMode.trend)
-                  Row(children: [
-                    const SizedBox(width: 12),
-                    const Text('Secondary'),
-                    const SizedBox(width: 6),
-                    DropdownButton<String>(
-                      value: _secondMetric,
-                      items: const [
-                        DropdownMenuItem(value: 'none', child: Text('None')),
-                        DropdownMenuItem(value: 'hr', child: Text('Heart Rate')),
-                        DropdownMenuItem(value: 'resting_hr', child: Text('Resting HR')),
-                        DropdownMenuItem(value: 'hrv_sdnn', child: Text('HRV SDNN')),
-                        DropdownMenuItem(value: 'hrv_rmssd', child: Text('HRV RMSSD')),
-                        DropdownMenuItem(value: 'steps', child: Text('Steps')),
-                        DropdownMenuItem(value: 'sleep', child: Text('Sleep (min)')),
-                        DropdownMenuItem(value: 'energy', child: Text('Active Energy (kcal)')),
-                        DropdownMenuItem(value: 'workouts', child: Text('Exercise Time (min)')),
-                      ],
-                      onChanged: (v) async {
-                        if (v == null) return;
-                        setState(()=> _secondMetric = v);
-                        await _savePrefs();
-                        await _fetchData();
-                      },
-                    ),
-                  ]),
-                if (_mode == _ViewMode.trend && _trendDistribution)
-                  Row(children: [
-                    const Text('Tooltips'),
-                    const SizedBox(width: 6),
-                    Switch(value: _trendTooltips, onChanged: (v){ setState(()=> _trendTooltips = v); _savePrefs(); }),
-                    const SizedBox(width: 12),
-                    const Text('Smoothing'),
-                    const SizedBox(width: 6),
-                    Switch(value: _trendSmoothing, onChanged: (v){ setState(()=> _trendSmoothing = v); _savePrefs(); }),
-                    const SizedBox(width: 8),
-                    SizedBox(
-                      width: 180,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Window: ${_trendSmoothDays}d', style: const TextStyle(fontSize: 12)),
-                          Slider(
-                            value: _trendSmoothDays.toDouble(),
-                            min: 3,
-                            max: 15,
-                            divisions: 6,
-                            label: '${_trendSmoothDays}d',
-                            onChanged: _trendSmoothing ? (v) {
-                              int d = v.round();
-                              if (d % 2 == 0) d += 1; // force odd
-                              if (d < 3) d = 3; if (d > 15) d = 15;
-                              setState(() => _trendSmoothDays = d);
-                              _savePrefs();
-                            } : null,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ]),
-                Row(children: [
-                  const Text('Bands'),
-                  const SizedBox(width: 6),
-                  Switch(
-                    value: _showBands,
-                    onChanged: (v) => setState(() => _showBands = v),
-                  ),
-                ]),
-                Row(children: [
-                  const Text('Anchor to dose'),
-                  const SizedBox(width: 6),
-                  Switch(
-                    value: _anchorToDose,
-                    onChanged: (v) {
-                      setState(() => _anchorToDose = v);
+                    onPressed: (i) {
+                      setState(() => _trendDistribution = (i == 1));
                       _savePrefs();
                     },
+                    children: const [
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 12),
+                        child: Text('Lines'),
+                      ),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 12),
+                        child: Text('Distribution'),
+                      ),
+                    ],
                   ),
-                ]),
+                IconButton(
+                  icon: const Icon(Icons.info_outline),
+                  tooltip: 'Chart help',
+                  onPressed: _showHelp,
+                ),
+                // Secondary axis selector (Trend only)
+                if (_mode == _ViewMode.trend)
+                  Row(
+                    children: [
+                      const SizedBox(width: 12),
+                      const Text('Secondary'),
+                      const SizedBox(width: 6),
+                      DropdownButton<String>(
+                        value: _secondMetric,
+                        items: const [
+                          DropdownMenuItem(value: 'none', child: Text('None')),
+                          DropdownMenuItem(
+                            value: 'hr',
+                            child: Text('Heart Rate'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'resting_hr',
+                            child: Text('Resting HR'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'hrv_sdnn',
+                            child: Text('HRV SDNN'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'hrv_rmssd',
+                            child: Text('HRV RMSSD'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'steps',
+                            child: Text('Steps'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'sleep',
+                            child: Text('Sleep (min)'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'energy',
+                            child: Text('Active Energy (kcal)'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'workouts',
+                            child: Text('Exercise Time (min)'),
+                          ),
+                        ],
+                        onChanged: (v) async {
+                          if (v == null) return;
+                          setState(() => _secondMetric = v);
+                          await _savePrefs();
+                          await _fetchData();
+                        },
+                      ),
+                    ],
+                  ),
+                if (_mode == _ViewMode.trend && _trendDistribution)
+                  Row(
+                    children: [
+                      const Text('Tooltips'),
+                      const SizedBox(width: 6),
+                      Switch(
+                        value: _trendTooltips,
+                        onChanged: (v) {
+                          setState(() => _trendTooltips = v);
+                          _savePrefs();
+                        },
+                      ),
+                      const SizedBox(width: 12),
+                      const Text('Smoothing'),
+                      const SizedBox(width: 6),
+                      Switch(
+                        value: _trendSmoothing,
+                        onChanged: (v) {
+                          setState(() => _trendSmoothing = v);
+                          _savePrefs();
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: 180,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Window: ${_trendSmoothDays}d',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            Slider(
+                              value: _trendSmoothDays.toDouble(),
+                              min: 3,
+                              max: 15,
+                              divisions: 6,
+                              label: '${_trendSmoothDays}d',
+                              onChanged: _trendSmoothing
+                                  ? (v) {
+                                      int d = v.round();
+                                      if (d % 2 == 0) d += 1; // force odd
+                                      if (d < 3) d = 3;
+                                      if (d > 15) d = 15;
+                                      setState(() => _trendSmoothDays = d);
+                                      _savePrefs();
+                                    }
+                                  : null,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                Row(
+                  children: [
+                    const Text('Bands'),
+                    const SizedBox(width: 6),
+                    Switch(
+                      value: _showBands,
+                      onChanged: (v) => setState(() => _showBands = v),
+                    ),
+                  ],
+                ),
+                Row(
+                  children: [
+                    const Text('Anchor to dose'),
+                    const SizedBox(width: 6),
+                    Switch(
+                      value: _anchorToDose,
+                      onChanged: (v) {
+                        setState(() => _anchorToDose = v);
+                        _savePrefs();
+                      },
+                    ),
+                  ],
+                ),
                 OutlinedButton.icon(
                   onPressed: !_anchorToDose
                       ? null
                       : () async {
                           final picked = await showTimePicker(
                             context: context,
-                            initialTime: _doseTime ?? const TimeOfDay(hour: 8, minute: 0),
+                            initialTime:
+                                _doseTime ??
+                                const TimeOfDay(hour: 8, minute: 0),
                           );
                           if (picked != null) {
                             setState(() => _doseTime = picked);
@@ -948,9 +1232,11 @@ class _LatestBPPageState extends State<LatestBPPage> {
                           }
                         },
                   icon: const Icon(Icons.medication),
-                  label: Text(_doseTime == null
-                      ? 'Dose time'
-                      : '${_doseTime!.hour.toString().padLeft(2, '0')}:${_doseTime!.minute.toString().padLeft(2, '0')}'),
+                  label: Text(
+                    _doseTime == null
+                        ? 'Dose time'
+                        : '${_doseTime!.hour.toString().padLeft(2, '0')}:${_doseTime!.minute.toString().padLeft(2, '0')}',
+                  ),
                 ),
               ],
             ),
@@ -980,10 +1266,14 @@ class _LatestBPPageState extends State<LatestBPPage> {
                 runSpacing: 6,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: const [
-                  _LegendDot(color: Colors.red), Text('A: Systolic'),
-                  _LegendDot(color: Colors.blue), Text('A: Diastolic'),
-                  _LegendDot(color: Colors.orange), Text('B: Systolic'),
-                  _LegendDot(color: Colors.lightBlue), Text('B: Diastolic'),
+                  _LegendDot(color: Colors.red),
+                  Text('A: Systolic'),
+                  _LegendDot(color: Colors.blue),
+                  Text('A: Diastolic'),
+                  _LegendDot(color: Colors.orange),
+                  Text('B: Systolic'),
+                  _LegendDot(color: Colors.lightBlue),
+                  Text('B: Diastolic'),
                 ],
               ),
             const SizedBox(height: 8),
@@ -1009,70 +1299,96 @@ class _LatestBPPageState extends State<LatestBPPage> {
                   height: 260,
                   child: (_seriesA != null && _seriesB != null)
                       ? AverageDayCompareChart(
-                          seriesA: _seriesA!.map((e)=> cm.ChartBp(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList(),
-                          seriesB: _seriesB!.map((e)=> cm.ChartBp(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList(),
-                          anchorMinute: _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null,
+                          seriesA: _seriesA!
+                              .map(
+                                (e) => cm.ChartBp(
+                                  t: e.timestamp,
+                                  sbp: e.systolic,
+                                  dbp: e.diastolic,
+                                ),
+                              )
+                              .toList(),
+                          seriesB: _seriesB!
+                              .map(
+                                (e) => cm.ChartBp(
+                                  t: e.timestamp,
+                                  sbp: e.systolic,
+                                  dbp: e.diastolic,
+                                ),
+                              )
+                              .toList(),
+                          anchorMinute: _anchorToDose && _doseTime != null
+                              ? _doseTime!.hour * 60 + _doseTime!.minute
+                              : null,
                           showBands: _showBands,
                         )
-                    : const Center(child: Text('Pick two ranges and tap Fetch.')),
+                      : const Center(
+                          child: Text('Pick two ranges and tap Fetch.'),
+                        ),
                 ),
               )
             else if (_series.isNotEmpty)
               // Build both charts stacked so we can capture either/both for PDF.
               SizedBox(
                 height: 260,
-                child: Stack(children: [
-                  // Hidden counterpart (average day)
-                  if (true)
-                    IgnorePointer(
-                      ignoring: true,
-                      child: Opacity(
-                        opacity: _mode == _ViewMode.averageDay ? 1.0 : 0.001,
-                        child: RepaintBoundary(
-                          key: _avgChartKeyCapture,
-                          child: AverageDayChart(
-                            series: _series.map((e)=> cm.ChartBp(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList(),
-                            anchorMinute: _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null,
-                            showBands: _showBands,
-                            showSys: _showSys,
-                            showDia: _showDia,
-                            // pass samples for HR/HRV/Steps/Sleep
-                            secondarySamples: (_secondMetric == 'resting_hr' || _secondMetric == 'hr' || _secondMetric == 'hrv_sdnn' || _secondMetric == 'hrv_rmssd' || _secondMetric == 'steps' || _secondMetric == 'sleep') ? _secSamples : const [],
-                            secondaryLabel: _secondMetric,
+                child: Stack(
+                  children: [
+                    // Hidden counterpart (average day)
+                    if (true)
+                      IgnorePointer(
+                        ignoring: true,
+                        child: Opacity(
+                          opacity: _mode == _ViewMode.averageDay ? 1.0 : 0.001,
+                          child: RepaintBoundary(
+                            key: _avgChartKeyCapture,
+                            child: AverageDayChart(
+                              series: _series
+                                  .map(
+                                    (e) => cm.ChartBp(
+                                      t: e.timestamp,
+                                      sbp: e.systolic,
+                                      dbp: e.diastolic,
+                                    ),
+                                  )
+                                  .toList(),
+                              anchorMinute: _anchorToDose && _doseTime != null
+                                  ? _doseTime!.hour * 60 + _doseTime!.minute
+                                  : null,
+                              showBands: _showBands,
+                              showSys: _showSys,
+                              showDia: _showDia,
+                              // pass samples for HR/HRV/Steps/Sleep
+                              secondarySamples:
+                                  (_secondMetric == 'resting_hr' ||
+                                      _secondMetric == 'hr' ||
+                                      _secondMetric == 'hrv_sdnn' ||
+                                      _secondMetric == 'hrv_rmssd' ||
+                                      _secondMetric == 'steps' ||
+                                      _secondMetric == 'sleep')
+                                  ? _secSamples
+                                  : const [],
+                              secondaryLabel: _secondMetric,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  // Hidden/visible trend chart
-                  IgnorePointer(
-                    ignoring: true,
-                    child: Opacity(
-                      opacity: _mode == _ViewMode.trend ? 1.0 : 0.001,
-                      child: RepaintBoundary(
-                        key: _trendChartKeyCapture,
-                        child: TrendChart(
-                          series: _series.map((e)=> cm.ChartBp(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList(),
-                          start: _rangeStart,
-                          end: _rangeEnd,
-                          showSys: _showSys,
-                          showDia: _showDia,
-                          distribution: _trendDistribution,
-                          tooltipsEnabled: _trendTooltips,
-                          smoothingEnabled: _trendSmoothing,
-                          smoothingWindowDays: _trendSmoothDays,
-                          smoothingMethod: _trendSmoothMethod,
-                          secondary: _secSeries,
-                          secondaryLabel: _secondMetric,
-                        ),
-                      ),
-                    ),
-                  ),
-                  // Visible interactive chart on top (to allow pointer events)
-                  RepaintBoundary(
-                    key: _mode == _ViewMode.trend ? _trendChartKey : _avgChartKey,
-                    child: _mode == _ViewMode.trend
-                        ? TrendChart(
-                            series: _series.map((e)=> cm.ChartBp(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList(),
+                    // Hidden/visible trend chart
+                    IgnorePointer(
+                      ignoring: true,
+                      child: Opacity(
+                        opacity: _mode == _ViewMode.trend ? 1.0 : 0.001,
+                        child: RepaintBoundary(
+                          key: _trendChartKeyCapture,
+                          child: TrendChart(
+                            series: _series
+                                .map(
+                                  (e) => cm.ChartBp(
+                                    t: e.timestamp,
+                                    sbp: e.systolic,
+                                    dbp: e.diastolic,
+                                  ),
+                                )
+                                .toList(),
                             start: _rangeStart,
                             end: _rangeEnd,
                             showSys: _showSys,
@@ -1084,30 +1400,86 @@ class _LatestBPPageState extends State<LatestBPPage> {
                             smoothingMethod: _trendSmoothMethod,
                             secondary: _secSeries,
                             secondaryLabel: _secondMetric,
-                          )
-                        : AverageDayChart(
-                            series: _series.map((e)=> cm.ChartBp(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList(),
-                            anchorMinute: _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null,
-                            showBands: _showBands,
-                            showSys: _showSys,
-                            showDia: _showDia,
-                            secondarySamples: (_secondMetric == 'resting_hr' || _secondMetric == 'hr' || _secondMetric == 'hrv_sdnn' || _secondMetric == 'hrv_rmssd' || _secondMetric == 'steps' || _secondMetric == 'sleep') ? _secSamples : const [],
-                            secondaryLabel: _secondMetric,
                           ),
-                  ),
-                ]),
+                        ),
+                      ),
+                    ),
+                    // Visible interactive chart on top (to allow pointer events)
+                    RepaintBoundary(
+                      key: _mode == _ViewMode.trend
+                          ? _trendChartKey
+                          : _avgChartKey,
+                      child: _mode == _ViewMode.trend
+                          ? TrendChart(
+                              series: _series
+                                  .map(
+                                    (e) => cm.ChartBp(
+                                      t: e.timestamp,
+                                      sbp: e.systolic,
+                                      dbp: e.diastolic,
+                                    ),
+                                  )
+                                  .toList(),
+                              start: _rangeStart,
+                              end: _rangeEnd,
+                              showSys: _showSys,
+                              showDia: _showDia,
+                              distribution: _trendDistribution,
+                              tooltipsEnabled: _trendTooltips,
+                              smoothingEnabled: _trendSmoothing,
+                              smoothingWindowDays: _trendSmoothDays,
+                              smoothingMethod: _trendSmoothMethod,
+                              secondary: _secSeries,
+                              secondaryLabel: _secondMetric,
+                            )
+                          : AverageDayChart(
+                              series: _series
+                                  .map(
+                                    (e) => cm.ChartBp(
+                                      t: e.timestamp,
+                                      sbp: e.systolic,
+                                      dbp: e.diastolic,
+                                    ),
+                                  )
+                                  .toList(),
+                              anchorMinute: _anchorToDose && _doseTime != null
+                                  ? _doseTime!.hour * 60 + _doseTime!.minute
+                                  : null,
+                              showBands: _showBands,
+                              showSys: _showSys,
+                              showDia: _showDia,
+                              secondarySamples:
+                                  (_secondMetric == 'resting_hr' ||
+                                      _secondMetric == 'hr' ||
+                                      _secondMetric == 'hrv_sdnn' ||
+                                      _secondMetric == 'hrv_rmssd' ||
+                                      _secondMetric == 'steps' ||
+                                      _secondMetric == 'sleep')
+                                  ? _secSamples
+                                  : const [],
+                              secondaryLabel: _secondMetric,
+                            ),
+                    ),
+                  ],
+                ),
               )
             else
               const Text('No data available for selected range.'),
             const SizedBox(height: 6),
-            if (_mode != _ViewMode.compare) Text(_effectiveRangeLabel(_series, _rangeStart, _rangeEnd), style: const TextStyle(fontSize: 12, color: Colors.black54)),
+            if (_mode != _ViewMode.compare)
+              Text(
+                _effectiveRangeLabel(_series, _rangeStart, _rangeEnd),
+                style: const TextStyle(fontSize: 12, color: Colors.black54),
+              ),
             const SizedBox(height: 12),
             _SummaryCards(
               mode: _mode,
               series: _series,
               seriesA: _seriesA,
               seriesB: _seriesB,
-              anchorMinute: _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null,
+              anchorMinute: _anchorToDose && _doseTime != null
+                  ? _doseTime!.hour * 60 + _doseTime!.minute
+                  : null,
             ),
             const SizedBox(height: 16),
             _ReadingsSection(
@@ -1117,15 +1489,17 @@ class _LatestBPPageState extends State<LatestBPPage> {
               entriesB: _seriesB,
               limit: _listLimit,
               loading: _listLoadingMore,
-              onLoadMore: _mode == _ViewMode.compare ? _loadMoreReadingsCompare : _loadMoreReadings,
+              onLoadMore: _mode == _ViewMode.compare
+                  ? _loadMoreReadingsCompare
+                  : _loadMoreReadings,
             ),
             const SizedBox(height: 16),
             if (_error != null)
-              Text(
-                _error!,
-                style: const TextStyle(color: Colors.red),
-              ),
-            const Text('Latest entry (if available):', style: TextStyle(fontWeight: FontWeight.bold)),
+              Text(_error!, style: const TextStyle(color: Colors.red)),
+            const Text(
+              'Latest entry (if available):',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 8),
             _LatestTable(entry: _latest),
             const SizedBox(height: 12),
@@ -1143,39 +1517,73 @@ class _LatestBPPageState extends State<LatestBPPage> {
   Future<void> _openSummaries() async {
     final st = await _bpStatsForSeries(_series);
     if (!mounted) return;
-    showModalBottomSheet(context: context, builder: (ctx){
-      return SafeArea(child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Summaries', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            _summaryRow('Day mean SBP', st.dayMeanS, suffix: ' mmHg'),
-            _summaryRow('Night mean SBP', st.nightMeanS, suffix: ' mmHg'),
-            _summaryRow('Day mean DBP', st.dayMeanD, suffix: ' mmHg'),
-            _summaryRow('Night mean DBP', st.nightMeanD, suffix: ' mmHg'),
-            _summaryRow('Dipping SBP', st.dipS, suffix: ' %', digits: 1),
-            _summaryRow('Dipping DBP', st.dipD, suffix: ' %', digits: 1),
-            _summaryRow('Morning surge SBP', st.morningSurgeS, suffix: ' mmHg'),
-            _summaryRow('Morning surge DBP', st.morningSurgeD, suffix: ' mmHg'),
-            if (st.morningSurgeStrictSts != null)
-              _summaryRow('STS (strict)', st.morningSurgeStrictSts, suffix: ' mmHg'),
-            if (st.morningSurgeStrictPrewake != null)
-              _summaryRow('Prewaking (strict)', st.morningSurgeStrictPrewake, suffix: ' mmHg'),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ));
-    });
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Summaries',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                _summaryRow('Day mean SBP', st.dayMeanS, suffix: ' mmHg'),
+                _summaryRow('Night mean SBP', st.nightMeanS, suffix: ' mmHg'),
+                _summaryRow('Day mean DBP', st.dayMeanD, suffix: ' mmHg'),
+                _summaryRow('Night mean DBP', st.nightMeanD, suffix: ' mmHg'),
+                _summaryRow('Dipping SBP', st.dipS, suffix: ' %', digits: 1),
+                _summaryRow('Dipping DBP', st.dipD, suffix: ' %', digits: 1),
+                _summaryRow(
+                  'Morning surge SBP',
+                  st.morningSurgeS,
+                  suffix: ' mmHg',
+                ),
+                _summaryRow(
+                  'Morning surge DBP',
+                  st.morningSurgeD,
+                  suffix: ' mmHg',
+                ),
+                if (st.morningSurgeStrictSts != null)
+                  _summaryRow(
+                    'STS (strict)',
+                    st.morningSurgeStrictSts,
+                    suffix: ' mmHg',
+                  ),
+                if (st.morningSurgeStrictPrewake != null)
+                  _summaryRow(
+                    'Prewaking (strict)',
+                    st.morningSurgeStrictPrewake,
+                    suffix: ' mmHg',
+                  ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
-  Widget _summaryRow(String label, double? v, {String suffix = '', int digits = 0}) {
+  Widget _summaryRow(
+    String label,
+    double? v, {
+    String suffix = '',
+    int digits = 0,
+  }) {
     final text = v == null ? '-' : v.toStringAsFixed(digits) + suffix;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(children: [Expanded(child: Text(label)), Text(text, style: const TextStyle(fontWeight: FontWeight.w600))]),
+      child: Row(
+        children: [
+          Expanded(child: Text(label)),
+          Text(text, style: const TextStyle(fontWeight: FontWeight.w600)),
+        ],
+      ),
     );
   }
 
@@ -1184,91 +1592,94 @@ class _LatestBPPageState extends State<LatestBPPage> {
       context: context,
       isScrollControlled: true,
       builder: (ctx) {
-        final titleCtl = TextEditingController();
-        DateTime newEventDate = DateTime.now();
-        return StatefulBuilder(builder: (context, setSt) {
-          String q = '';
-          Future<void> pickDate() async {
-            final picked = await showDatePicker(context: context, firstDate: DateTime(2000), lastDate: DateTime.now().add(const Duration(days: 365)), initialDate: newEventDate);
-            if (picked != null) setSt(()=> newEventDate = picked);
-          }
-          return Padding(
-            padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-            child: SingleChildScrollView(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Text('Advanced Settings', style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 12),
-                  const Text('Trend Smoother'),
-                  Row(children: [
-                    Expanded(child: RadioListTile<String>(title: const Text('Moving Average'), value: 'ma', groupValue: _trendSmoothMethod, onChanged: (v){ setState(()=> _trendSmoothMethod = v!); _savePrefs();})),
-                    Expanded(child: RadioListTile<String>(title: const Text('EMA'), value: 'ema', groupValue: _trendSmoothMethod, onChanged: (v){ setState(()=> _trendSmoothMethod = v!); _savePrefs();})),
-                  ]),
-                  Row(children: [
-                    const Text('Auto window'),
-                    const SizedBox(width: 6),
-                    Switch(value: _trendSmoothAuto, onChanged: (v){ setState(()=> _trendSmoothAuto = v); if(v){ _applyAutoWindow(); } _savePrefs();}),
-                    const SizedBox(width: 12),
-                    if(!_trendSmoothAuto)
-                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text('Window: ${_trendSmoothDays}d', style: const TextStyle(fontSize: 12)),
-                        Slider(value: _trendSmoothDays.toDouble(), min: 3, max: 15, divisions: 6, label: '${_trendSmoothDays}d', onChanged: (v){ int d = v.round(); if(d%2==0) d+=1; setState(()=> _trendSmoothDays = d); _savePrefs();}),
-                      ])),
-                  ]),
-                  const Divider(),
-                  const SizedBox(height: 8),
-                  const Text('Strict Morning Surge'),
-                  const SizedBox(height: 6),
-                  Wrap(runSpacing: 6, spacing: 12, children: [
-                    SizedBox(width: 170, child: _NumField(label: 'Morning window (h)', value: _surgeMorningWindowHours, onChanged: (v){ setState(()=> _surgeMorningWindowHours = v); _savePrefs(); })),
-                    SizedBox(width: 170, child: _NumField(label: 'Trough window (h)', value: _surgeTroughWindowHours, onChanged: (v){ setState(()=> _surgeTroughWindowHours = v); _savePrefs(); })),
-                    SizedBox(width: 170, child: _NumField(label: 'Prewaking (h)', value: _surgePrewakeHours, onChanged: (v){ setState(()=> _surgePrewakeHours = v); _savePrefs(); })),
-                  ]),
-                  const SizedBox(height: 6),
-                  Wrap(runSpacing: 6, spacing: 12, children: [
-                    SizedBox(width: 170, child: _NumField(label: 'HR rise threshold (bpm)', value: _surgeHrRiseBpm, onChanged: (v){ setState(()=> _surgeHrRiseBpm = v); _savePrefs(); })),
-                    SizedBox(width: 170, child: _NumField(label: 'Steps in 30 min', value: _surgeSteps30Min, onChanged: (v){ setState(()=> _surgeSteps30Min = v); _savePrefs(); })),
-                  ]),
-                  const SizedBox(height: 6),
-                  Wrap(runSpacing: 6, spacing: 12, children: [
-                    SizedBox(width: 170, child: _NumField(label: 'Wake earliest hr', value: _surgeWakeEarliestHour, onChanged: (v){ setState(()=> _surgeWakeEarliestHour = v); _savePrefs(); })),
-                    SizedBox(width: 170, child: _NumField(label: 'Wake latest hr', value: _surgeWakeLatestHour, onChanged: (v){ setState(()=> _surgeWakeLatestHour = v); _savePrefs(); })),
-                  ]),
-                  const Text('Events (Bookmarks)'),
-                  const SizedBox(height: 8),
-                  Row(children: [
-                    Expanded(child: TextField(controller: titleCtl, decoration: const InputDecoration(labelText: 'Title', border: OutlineInputBorder()))),
-                    const SizedBox(width: 8),
-                    OutlinedButton.icon(onPressed: pickDate, icon: const Icon(Icons.date_range), label: Text('${newEventDate.month}/${newEventDate.day}/${newEventDate.year}')),
-                    const SizedBox(width: 8),
-                    ElevatedButton.icon(onPressed: () async { if(titleCtl.text.trim().isEmpty) return; await _addEvent(titleCtl.text.trim(), newEventDate); titleCtl.clear(); setSt((){}); }, icon: const Icon(Icons.add), label: const Text('Add')),
-                  ]),
-                  const SizedBox(height: 12),
-                  TextField(
-                    decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Filter events', border: OutlineInputBorder()),
-                    onChanged: (v){ setSt(()=> q = v.trim().toLowerCase()); },
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(height: 220, child: ListView.separated(itemBuilder: (_,i){ final list = _events.where((e)=> q.isEmpty || e.title.toLowerCase().contains(q)).toList(); if (i>=list.length) return const SizedBox.shrink(); final e = list[i]; return ListTile(
-                    title: Text('${e.title} — ${e.date.year}-${e.date.month.toString().padLeft(2,'0')}-${e.date.day.toString().padLeft(2,'0')}'),
-                    trailing: Wrap(spacing:6, children: [
-                      OutlinedButton(onPressed: (){ _setRangeFromEvent(e); }, child: const Text('Set Range')),
-                      OutlinedButton(onPressed: (){ _setRangeAFromEvent(e); }, child: const Text('Set A')),
-                      OutlinedButton(onPressed: (){ _setRangeBFromEvent(e); }, child: const Text('Set B')),
-                      IconButton(onPressed: () async {
-                        final t = await _promptText(context, 'Rename Event', e.title);
-                        if (t!=null && t.trim().isNotEmpty) { await _renameEvent(e.id, t.trim()); setSt((){}); }
-                      }, icon: const Icon(Icons.edit)),
-                      IconButton(onPressed: (){ _deleteEvent(e.id); setSt((){}); }, icon: const Icon(Icons.delete)),
-                    ]),
-                  ); }, separatorBuilder: (_, __)=> const Divider(height:1), itemCount: _events.where((e)=> q.isEmpty || e.title.toLowerCase().contains(q)).length)),
-                  const SizedBox(height: 12),
-                ]),
-              ),
-            ),
-          );
-        });
+        return AdvancedSettingsSheet(
+          trendSmoothMethod: _trendSmoothMethod,
+          trendSmoothAuto: _trendSmoothAuto,
+          trendSmoothDays: _trendSmoothDays,
+          onTrendSmoothMethod: (v) {
+            setState(() => _trendSmoothMethod = v);
+            _savePrefs();
+          },
+          onTrendSmoothAuto: (v) {
+            setState(() => _trendSmoothAuto = v);
+            if (v) _applyAutoWindow();
+            _savePrefs();
+          },
+          onTrendSmoothDays: (d) {
+            setState(() => _trendSmoothDays = d);
+            _savePrefs();
+          },
+          showBands: _showBands,
+          onShowBands: (v) {
+            setState(() => _showBands = v);
+            _savePrefs();
+          },
+          anchorToDose: _anchorToDose,
+          doseTime: _doseTime,
+          onAnchorToDose: (v) {
+            setState(() => _anchorToDose = v);
+            _savePrefs();
+          },
+          onDoseTimeChanged: (t) {
+            setState(() => _doseTime = t);
+            _savePrefs();
+          },
+          events: _events
+              .map((e) => mdl.Event(id: e.id, title: e.title, date: e.date))
+              .toList(),
+          onAddEvent: (title, date) async {
+            await _addEvent(title, date);
+          },
+          onRenameEvent: (id, title) async {
+            await _renameEvent(id, title);
+          },
+          onDeleteEvent: (id) async {
+            await _deleteEvent(id);
+          },
+          onSetRange: (e) async {
+            await _setRangeFromEvent(
+              _Event(id: e.id, title: e.title, date: e.date),
+            );
+          },
+          onSetA: (e) async {
+            await _setRangeAFromEvent(
+              _Event(id: e.id, title: e.title, date: e.date),
+            );
+          },
+          onSetB: (e) async {
+            await _setRangeBFromEvent(
+              _Event(id: e.id, title: e.title, date: e.date),
+            );
+          },
+          surgeMorningWindowHours: _surgeMorningWindowHours,
+          surgeTroughWindowHours: _surgeTroughWindowHours,
+          surgePrewakeHours: _surgePrewakeHours,
+          surgeHrRiseBpm: _surgeHrRiseBpm,
+          surgeSteps30Min: _surgeSteps30Min,
+          surgeWakeEarliestHour: _surgeWakeEarliestHour,
+          surgeWakeLatestHour: _surgeWakeLatestHour,
+          onSurgeChange:
+              ({
+                int? morning,
+                int? trough,
+                int? prewake,
+                int? hrRise,
+                int? steps30,
+                int? earliest,
+                int? latest,
+              }) {
+                setState(() {
+                  if (morning != null) _surgeMorningWindowHours = morning;
+                  if (trough != null) _surgeTroughWindowHours = trough;
+                  if (prewake != null) _surgePrewakeHours = prewake;
+                  if (hrRise != null) _surgeHrRiseBpm = hrRise;
+                  if (steps30 != null) _surgeSteps30Min = steps30;
+                  if (earliest != null) _surgeWakeEarliestHour = earliest;
+                  if (latest != null) _surgeWakeLatestHour = latest;
+                });
+                _savePrefs();
+              },
+        );
       },
     );
   }
@@ -1279,6 +1690,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
     String two(int n) => n.toString().padLeft(2, '0');
     return '${d.year}-${two(d.month)}-${two(d.day)}';
   }
+
   String _fmtTime(DateTime? t) {
     if (t == null) return '-';
     final d = t.toLocal();
@@ -1287,121 +1699,138 @@ class _LatestBPPageState extends State<LatestBPPage> {
   }
 
   void _showHelp() {
-    showDialog(context: context, builder: (ctx){
-      return AlertDialog(
-        title: const Text('Chart Help'),
-        content: const SizedBox(
-          width: 400,
-          child: SingleChildScrollView(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Trend vs Distribution'),
-              SizedBox(height: 8),
-              Text('• Lines: plots individual readings over calendar time.'),
-              Text('• Distribution: summarizes each day with median (line) and IQR (shaded band). Days with no readings are filled by interpolation.'),
-              SizedBox(height: 12),
-              Text('Smoothing'),
-              SizedBox(height: 8),
-              Text('• Applies a moving average (MA) or exponential moving average (EMA) over daily medians/IQR.'),
-              Text('• Window can be auto-tied to the date range or set manually (odd days).'),
-              SizedBox(height: 12),
-              Text('BP Zones'),
-              SizedBox(height: 8),
-              Text('• Background color bands appear when only one metric is enabled.'),
-              Text('• SBP: <120 green, 120–129 yellow, 130–139 orange, 140–179 red, 180+ dark red.'),
-              Text('• DBP: <80 green, 80–89 yellow, 90–119 red, 120+ dark red.'),
-              SizedBox(height: 12),
-              Text('Secondary Axis'),
-              SizedBox(height: 8),
-              Text('• Trend: HR, Resting HR, HRV, Steps, Sleep supported (right axis).'),
-              Text('• Average Day: HR/Resting HR/HRV/Steps/Sleep supported (right-axis overlay).'),
-            ]),
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Chart Help'),
+          content: const SizedBox(
+            width: 400,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Trend vs Distribution'),
+                  SizedBox(height: 8),
+                  Text(
+                    '• Lines: plots individual readings over calendar time.',
+                  ),
+                  Text(
+                    '• Distribution: summarizes each day with median (line) and IQR (shaded band). Days with no readings are filled by interpolation.',
+                  ),
+                  SizedBox(height: 12),
+                  Text('Smoothing'),
+                  SizedBox(height: 8),
+                  Text(
+                    '• Applies a moving average (MA) or exponential moving average (EMA) over daily medians/IQR.',
+                  ),
+                  Text(
+                    '• Window can be auto-tied to the date range or set manually (odd days).',
+                  ),
+                  SizedBox(height: 12),
+                  Text('BP Zones'),
+                  SizedBox(height: 8),
+                  Text(
+                    '• Background color bands appear when only one metric is enabled.',
+                  ),
+                  Text(
+                    '• SBP: <120 green, 120–129 yellow, 130–139 orange, 140–179 red, 180+ dark red.',
+                  ),
+                  Text(
+                    '• DBP: <80 green, 80–89 yellow, 90–119 red, 120+ dark red.',
+                  ),
+                  SizedBox(height: 12),
+                  Text('Secondary Axis'),
+                  SizedBox(height: 8),
+                  Text(
+                    '• Trend: HR, Resting HR, HRV, Steps, Sleep supported (right axis).',
+                  ),
+                  Text(
+                    '• Average Day: HR/Resting HR/HRV/Steps/Sleep supported (right-axis overlay).',
+                  ),
+                ],
+              ),
+            ),
           ),
-        ),
-        actions: [TextButton(onPressed: ()=> Navigator.pop(ctx), child: const Text('Close'))],
-      );
-    });
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _showAddBp() async {
-    final sysCtl = TextEditingController();
-    final diaCtl = TextEditingController();
-    DateTime when = DateTime.now();
-    String pos = _bpBodyPosition;
-    String arm = _bpArm;
-    await showModalBottomSheet(context: context, isScrollControlled: true, builder: (ctx){
-      return StatefulBuilder(builder: (context, setSt){
-        Future<void> pickDateTime() async {
-          final d = await showDatePicker(context: context, firstDate: DateTime(2000), lastDate: DateTime.now().add(const Duration(days: 365)), initialDate: when);
-          if (d == null) return;
-          if (!context.mounted) return;
-          final t = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(when));
-          if (!context.mounted) return;
-          setSt(()=> when = DateTime(d.year,d.month,d.day, t?.hour ?? when.hour, t?.minute ?? when.minute));
-        }
-        return Padding(
-          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-          child: SingleChildScrollView(child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Add Blood Pressure', style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 12),
-              Row(children:[
-                Expanded(child: TextField(controller: sysCtl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText:'Systolic', border: OutlineInputBorder()))),
-                const SizedBox(width: 8),
-                Expanded(child: TextField(controller: diaCtl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText:'Diastolic', border: OutlineInputBorder()))),
-              ]),
-              const SizedBox(height: 12),
-              Row(children:[
-                OutlinedButton.icon(onPressed: pickDateTime, icon: const Icon(Icons.access_time), label: Text('${when.month}/${when.day}/${when.year} ${when.hour.toString().padLeft(2,'0')}:${when.minute.toString().padLeft(2,'0')}')),
-              ]),
-              const SizedBox(height: 12),
-              Row(children:[
-                const Text('Position'), const SizedBox(width: 6),
-                DropdownButton<String>(value: pos, items: const [
-                  DropdownMenuItem(value:'sitting', child: Text('Sitting')),
-                  DropdownMenuItem(value:'standing', child: Text('Standing')),
-                  DropdownMenuItem(value:'supine', child: Text('Supine')),
-                ], onChanged: (v){ if(v!=null) setSt(()=> pos=v); }),
-                const SizedBox(width: 18),
-                const Text('Arm'), const SizedBox(width: 6),
-                DropdownButton<String>(value: arm, items: const [
-                  DropdownMenuItem(value:'left_upper_arm', child: Text('Left Upper Arm')),
-                  DropdownMenuItem(value:'right_upper_arm', child: Text('Right Upper Arm')),
-                  DropdownMenuItem(value:'wrist', child: Text('Wrist')),
-                ], onChanged: (v){ if(v!=null) setSt(()=> arm=v); }),
-              ]),
-              const SizedBox(height: 16),
-              Align(alignment: Alignment.centerRight, child: ElevatedButton.icon(onPressed: () async {
-                final s = int.tryParse(sysCtl.text.trim()); final d = int.tryParse(diaCtl.text.trim());
-                if (s==null || d==null) { if (!context.mounted) return; ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter valid numbers'))); return; }
-                final ok = await _health.writeBloodPressure(systolic: s, diastolic: d, startTime: when);
-                if (ok) {
-                  setState(() { _bpBodyPosition = pos; _bpArm = arm; });
-                  await _savePrefs();
-                  // Save local annotation for this timestamp
-                  await _saveBpAnnotation(when, pos, arm);
-                  if (context.mounted) Navigator.pop(context);
-                  _fetchData();
-                } else {
-                  if (!context.mounted) return; ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to save BP to Health Connect')));
-                }
-              }, icon: const Icon(Icons.save), label: const Text('Save to Health Connect'))),
-            ]),
-          )),
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return AddBpSheet(
+          defaultPosition: _bpBodyPosition,
+          defaultArm: _bpArm,
+          onSave: (s, d, when, pos, arm) async {
+            // Ensure WRITE permission for BP
+            final okPerm = await _ensureWritePermission();
+            if (!okPerm) {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Health write permission denied'),
+                  ),
+                );
+              }
+              return false;
+            }
+            final ok = await _health.writeBloodPressure(
+              systolic: s,
+              diastolic: d,
+              startTime: when,
+            );
+            if (ok) {
+              if (mounted) {
+                setState(() {
+                  _bpBodyPosition = pos;
+                  _bpArm = arm;
+                });
+              }
+              await _savePrefs();
+              await _saveBpAnnotation(when, pos, arm);
+              await _fetchData();
+              return true;
+            }
+            return false;
+          },
         );
-      });
-    });
+      },
+    );
   }
 
-  Future<String?> _promptText(BuildContext context, String title, String initial) async {
-    final ctl = TextEditingController(text: initial);
-    return showDialog<String>(context: context, builder: (ctx){
-      return AlertDialog(title: Text(title), content: TextField(controller: ctl), actions: [
-        TextButton(onPressed: ()=> Navigator.pop(ctx), child: const Text('Cancel')),
-        ElevatedButton(onPressed: ()=> Navigator.pop(ctx, ctl.text), child: const Text('Save')),
-      ]);
-    });
+  Future<bool> _ensureWritePermission() async {
+    await _health.configure();
+    const types = <HealthDataType>[
+      HealthDataType.BLOOD_PRESSURE_SYSTOLIC,
+      HealthDataType.BLOOD_PRESSURE_DIASTOLIC,
+    ];
+    const permissions = <HealthDataAccess>[
+      HealthDataAccess.WRITE,
+      HealthDataAccess.WRITE,
+    ];
+    final hasPerm =
+        await _health.hasPermissions(types, permissions: permissions) ?? false;
+    if (!hasPerm) {
+      final granted = await _health.requestAuthorization(
+        types,
+        permissions: permissions,
+      );
+      if (!granted) return false;
+    }
+    return true;
   }
+
+  // _promptText removed (now handled in AdvancedSettingsSheet)
 
   void _applyAutoWindow() {
     final days = _rangeEnd.difference(_rangeStart).inDays.abs();
@@ -1416,7 +1845,7 @@ class _LatestBPPageState extends State<LatestBPPage> {
       w = 21;
     }
     if (w % 2 == 0) w += 1;
-    setState(()=> _trendSmoothDays = w);
+    setState(() => _trendSmoothDays = w);
   }
 
   Future<void> _exportTsv() async {
@@ -1429,17 +1858,35 @@ class _LatestBPPageState extends State<LatestBPPage> {
       final buf = StringBuffer();
       if (_mode == _ViewMode.trend) {
         buf.writeln('mode\tstart\tend');
-        buf.writeln('trend\t${_rangeStart.toIso8601String()}\t${_rangeEnd.toIso8601String()}');
+        buf.writeln(
+          'trend\t${_rangeStart.toIso8601String()}\t${_rangeEnd.toIso8601String()}',
+        );
         buf.writeln('timestamp\tsystolic_mmHg\tdiastolic_mmHg\tsource');
         for (final e in _series) {
           final ts = e.timestamp?.toIso8601String() ?? '';
-          buf.writeln('$ts\t${e.systolic?.toStringAsFixed(1) ?? ''}\t${e.diastolic?.toStringAsFixed(1) ?? ''}\t${e.source ?? ''}');
+          buf.writeln(
+            '$ts\t${e.systolic?.toStringAsFixed(1) ?? ''}\t${e.diastolic?.toStringAsFixed(1) ?? ''}\t${e.source ?? ''}',
+          );
         }
       } else if (_mode == _ViewMode.averageDay) {
-        final agg = avg.AverageDayAggregator(series: _series.map((e)=> avg.AvgBpInput(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList()).compute(stepMinutes: 15, smoothMinutes: 45);
+        final agg = avg.AverageDayAggregator(
+          series: _series
+              .map(
+                (e) => avg.AvgBpInput(
+                  t: e.timestamp,
+                  sbp: e.systolic,
+                  dbp: e.diastolic,
+                ),
+              )
+              .toList(),
+        ).compute(stepMinutes: 15, smoothMinutes: 45);
         buf.writeln('mode\tstart\tend');
-        buf.writeln('average_day\t${_rangeStart.toIso8601String()}\t${_rangeEnd.toIso8601String()}');
-        buf.writeln('minute_of_day\ttime_label\tsystolic_mean_mmHg\tdiastolic_mean_mmHg');
+        buf.writeln(
+          'average_day\t${_rangeStart.toIso8601String()}\t${_rangeEnd.toIso8601String()}',
+        );
+        buf.writeln(
+          'minute_of_day\ttime_label\tsystolic_mean_mmHg\tdiastolic_mean_mmHg',
+        );
         for (int i = 0; i < agg.minutes.length; i++) {
           final m = agg.minutes[i];
           final h = (m / 60).floor();
@@ -1454,17 +1901,45 @@ class _LatestBPPageState extends State<LatestBPPage> {
         if (_seriesA == null || _seriesB == null) {
           if (!mounted) return;
           if (!context.mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pick two ranges and Fetch first.')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Pick two ranges and Fetch first.')),
+          );
           return;
         }
         buf.writeln('mode');
         buf.writeln('compare');
         buf.writeln('rangeA_start\trangeA_end\trangeB_start\trangeB_end');
-        buf.writeln('${_rangeA?.start.toIso8601String() ?? ''}\t${_rangeA?.end.toIso8601String() ?? ''}\t${_rangeB?.start.toIso8601String() ?? ''}\t${_rangeB?.end.toIso8601String() ?? ''}');
-        buf.writeln('minute_of_day\ttime_label\tA_systolic\tA_diastolic\tB_systolic\tB_diastolic\tDelta_systolic(B-A)\tDelta_diastolic(B-A)');
-        final anchorMin = _anchorToDose && _doseTime != null ? _doseTime!.hour * 60 + _doseTime!.minute : null;
-        final aggA = avg.AverageDayAggregator(series: _seriesA!.map((e)=> avg.AvgBpInput(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList()).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMin);
-        final aggB = avg.AverageDayAggregator(series: _seriesB!.map((e)=> avg.AvgBpInput(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList()).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMin);
+        buf.writeln(
+          '${_rangeA?.start.toIso8601String() ?? ''}\t${_rangeA?.end.toIso8601String() ?? ''}\t${_rangeB?.start.toIso8601String() ?? ''}\t${_rangeB?.end.toIso8601String() ?? ''}',
+        );
+        buf.writeln(
+          'minute_of_day\ttime_label\tA_systolic\tA_diastolic\tB_systolic\tB_diastolic\tDelta_systolic(B-A)\tDelta_diastolic(B-A)',
+        );
+        final anchorMin = _anchorToDose && _doseTime != null
+            ? _doseTime!.hour * 60 + _doseTime!.minute
+            : null;
+        final aggA = avg.AverageDayAggregator(
+          series: _seriesA!
+              .map(
+                (e) => avg.AvgBpInput(
+                  t: e.timestamp,
+                  sbp: e.systolic,
+                  dbp: e.diastolic,
+                ),
+              )
+              .toList(),
+        ).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMin);
+        final aggB = avg.AverageDayAggregator(
+          series: _seriesB!
+              .map(
+                (e) => avg.AvgBpInput(
+                  t: e.timestamp,
+                  sbp: e.systolic,
+                  dbp: e.diastolic,
+                ),
+              )
+              .toList(),
+        ).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMin);
         for (int i = 0; i < aggA.minutes.length; i++) {
           final m = aggA.minutes[i];
           final h = (m / 60).floor();
@@ -1476,20 +1951,36 @@ class _LatestBPPageState extends State<LatestBPPage> {
           final bS = aggB.sysMean[i];
           final bD = aggB.diaMean[i];
           String f(double? v) => v == null ? '' : v.toStringAsFixed(1);
-          final dS = (bS != null && aS != null) ? (bS - aS).toStringAsFixed(1) : '';
-          final dD = (bD != null && aD != null) ? (bD - aD).toStringAsFixed(1) : '';
-          buf.writeln('$m\t$label\t${f(aS)}\t${f(aD)}\t${f(bS)}\t${f(bD)}\t$dS\t$dD');
+          final dS = (bS != null && aS != null)
+              ? (bS - aS).toStringAsFixed(1)
+              : '';
+          final dD = (bD != null && aD != null)
+              ? (bD - aD).toStringAsFixed(1)
+              : '';
+          buf.writeln(
+            '$m\t$label\t${f(aS)}\t${f(aD)}\t${f(bS)}\t${f(bD)}\t$dS\t$dD',
+          );
         }
       }
 
       await file.writeAsString(buf.toString());
-      final x = XFile(file.path, mimeType: 'text/tab-separated-values', name: file.uri.pathSegments.last);
+      final x = XFile(
+        file.path,
+        mimeType: 'text/tab-separated-values',
+        name: file.uri.pathSegments.last,
+      );
       if (!mounted) return;
-      await Share.shareXFiles([x], subject: 'Blood Pressure Export (TSV)', text: 'Attached TSV export from Blood Pressure app.');
+      await Share.shareXFiles(
+        [x],
+        subject: 'Blood Pressure Export (TSV)',
+        text: 'Attached TSV export from Blood Pressure app.',
+      );
     } catch (e) {
       if (!mounted) return;
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Export failed: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
     }
   }
 
@@ -1498,25 +1989,38 @@ class _LatestBPPageState extends State<LatestBPPage> {
       // Simple preflight dialog with include-both-charts toggle
       bool includeBoth = _pdfIncludeBothCharts;
       if (mounted) {
-        includeBoth = await showDialog<bool>(
+        includeBoth =
+            await showDialog<bool>(
               context: context,
               builder: (ctx) {
                 bool tmp = _pdfIncludeBothCharts;
-                return StatefulBuilder(builder: (context, setSt) {
-                  return AlertDialog(
-                    title: const Text('Export PDF'),
-                    content: CheckboxListTile(
-                      value: tmp,
-                      onChanged: (v) => setSt(() => tmp = v ?? true),
-                      title: const Text('Include both charts (Trend + Average Day)'),
-                    ),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                      ElevatedButton(onPressed: () => Navigator.pop(ctx, tmp), child: const Text('Export')),
-                    ],
-                  );
-                });
-              }) ?? _pdfIncludeBothCharts;
+                return StatefulBuilder(
+                  builder: (context, setSt) {
+                    return AlertDialog(
+                      title: const Text('Export PDF'),
+                      content: CheckboxListTile(
+                        value: tmp,
+                        onChanged: (v) => setSt(() => tmp = v ?? true),
+                        title: const Text(
+                          'Include both charts (Trend + Average Day)',
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Cancel'),
+                        ),
+                        ElevatedButton(
+                          onPressed: () => Navigator.pop(ctx, tmp),
+                          child: const Text('Export'),
+                        ),
+                      ],
+                    );
+                  },
+                );
+              },
+            ) ??
+            _pdfIncludeBothCharts;
         _pdfIncludeBothCharts = includeBoth;
         await _savePrefs();
       }
@@ -1534,28 +2038,50 @@ class _LatestBPPageState extends State<LatestBPPage> {
 
       // capture chart image(s)
       final List<pw.Widget> chartWidgets = [];
-      await Future.delayed(const Duration(milliseconds: 60)); // allow hidden charts to paint
+      await Future.delayed(
+        const Duration(milliseconds: 60),
+      ); // allow hidden charts to paint
       if (_mode == _ViewMode.compare) {
         final png = await _captureChartPng(_compareChartKey);
-        if (png != null) chartWidgets.add(pw.Center(child: pw.Image(pw.MemoryImage(png), width: 500)));
+        if (png != null) {
+          chartWidgets.add(
+            pw.Center(child: pw.Image(pw.MemoryImage(png), width: 500)),
+          );
+        }
       } else {
         if (includeBoth) {
           final tPng = await _captureChartPng(_trendChartKeyCapture);
           final aPng = await _captureChartPng(_avgChartKeyCapture);
-          if (tPng != null) chartWidgets.add(pw.Center(child: pw.Image(pw.MemoryImage(tPng), width: 500)));
-          if (aPng != null) chartWidgets.add(pw.SizedBox(height: 8));
-          if (aPng != null) chartWidgets.add(pw.Center(child: pw.Image(pw.MemoryImage(aPng), width: 500)));
+          if (tPng != null) {
+            chartWidgets.add(
+              pw.Center(child: pw.Image(pw.MemoryImage(tPng), width: 500)),
+            );
+          }
+          if (aPng != null) {
+            chartWidgets.add(pw.SizedBox(height: 8));
+          }
+          if (aPng != null) {
+            chartWidgets.add(
+              pw.Center(child: pw.Image(pw.MemoryImage(aPng), width: 500)),
+            );
+          }
         } else {
           final ck = _chartKeyForMode();
           if (ck != null) {
             final png = await _captureChartPng(ck);
-            if (png != null) chartWidgets.add(pw.Center(child: pw.Image(pw.MemoryImage(png), width: 500)));
+            if (png != null) {
+              chartWidgets.add(
+                pw.Center(child: pw.Image(pw.MemoryImage(png), width: 500)),
+              );
+            }
           }
         }
       }
 
       // Compute BP summary stats
-      final bpStats = _mode == _ViewMode.compare && _seriesA != null ? await _bpStatsForSeries(_seriesA!) : await _bpStatsForSeries(_series);
+      final bpStats = _mode == _ViewMode.compare && _seriesA != null
+          ? await _bpStatsForSeries(_seriesA!)
+          : await _bpStatsForSeries(_series);
       final hrHrvHeader = _hrHrvSummaryHeader();
 
       doc.addPage(
@@ -1564,48 +2090,129 @@ class _LatestBPPageState extends State<LatestBPPage> {
           margin: const pw.EdgeInsets.all(24),
           build: (ctx) {
             final rows = <pw.TableRow>[];
-            rows.add(pw.TableRow(children: [pw.Text('Date'), pw.Text('Time'), pw.Text('SBP'), pw.Text('DBP'), pw.Text('Pos'), pw.Text('Arm'), pw.Text('Source')]));
-            final list = [..._series]..sort((a,b)=> (b.timestamp??DateTime(0)).compareTo(a.timestamp??DateTime(0)));
+            rows.add(
+              pw.TableRow(
+                children: [
+                  pw.Text('Date'),
+                  pw.Text('Time'),
+                  pw.Text('SBP'),
+                  pw.Text('DBP'),
+                  pw.Text('Pos'),
+                  pw.Text('Arm'),
+                  pw.Text('Source'),
+                ],
+              ),
+            );
+            final list = [..._series]
+              ..sort(
+                (a, b) => (b.timestamp ?? DateTime(0)).compareTo(
+                  a.timestamp ?? DateTime(0),
+                ),
+              );
             for (final e in list.take(20)) {
               final bg = _pdfBgForBp(e);
               final ann = _annotationFor(e.timestamp);
-              rows.add(pw.TableRow(children: [
-                pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(_fmtDate(e.timestamp)) ),
-                pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(_fmtTime(e.timestamp)) ),
-                pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(e.systolic?.toStringAsFixed(0) ?? '-') ),
-                pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(e.diastolic?.toStringAsFixed(0) ?? '-') ),
-                pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(ann?.$1 ?? '-')),
-                pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(ann?.$2 ?? '-')),
-                pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(e.source ?? '')), 
-              ]));
+              rows.add(
+                pw.TableRow(
+                  children: [
+                    pw.Container(
+                      color: bg,
+                      padding: const pw.EdgeInsets.all(2),
+                      child: pw.Text(_fmtDate(e.timestamp)),
+                    ),
+                    pw.Container(
+                      color: bg,
+                      padding: const pw.EdgeInsets.all(2),
+                      child: pw.Text(_fmtTime(e.timestamp)),
+                    ),
+                    pw.Container(
+                      color: bg,
+                      padding: const pw.EdgeInsets.all(2),
+                      child: pw.Text(e.systolic?.toStringAsFixed(0) ?? '-'),
+                    ),
+                    pw.Container(
+                      color: bg,
+                      padding: const pw.EdgeInsets.all(2),
+                      child: pw.Text(e.diastolic?.toStringAsFixed(0) ?? '-'),
+                    ),
+                    pw.Container(
+                      color: bg,
+                      padding: const pw.EdgeInsets.all(2),
+                      child: pw.Text(ann?.$1 ?? '-'),
+                    ),
+                    pw.Container(
+                      color: bg,
+                      padding: const pw.EdgeInsets.all(2),
+                      child: pw.Text(ann?.$2 ?? '-'),
+                    ),
+                    pw.Container(
+                      color: bg,
+                      padding: const pw.EdgeInsets.all(2),
+                      child: pw.Text(e.source ?? ''),
+                    ),
+                  ],
+                ),
+              );
             }
             return [
-              pw.Text('Blood Pressure Report', style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
+              pw.Text(
+                'Blood Pressure Report',
+                style: pw.TextStyle(
+                  fontSize: 20,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
               pw.SizedBox(height: 6),
               pw.Text(eff),
               if (hrHrvHeader != null) ...[
                 pw.SizedBox(height: 6),
-                pw.Text(hrHrvHeader, style: const pw.TextStyle(fontSize: 12, color: PdfColors.grey700)),
+                pw.Text(
+                  hrHrvHeader,
+                  style: const pw.TextStyle(
+                    fontSize: 12,
+                    color: PdfColors.grey700,
+                  ),
+                ),
               ],
-              if (secSummary.isNotEmpty) pw.Text(secSummary, style: const pw.TextStyle(fontSize: 12, color: PdfColors.grey700)),
+              if (secSummary.isNotEmpty)
+                pw.Text(
+                  secSummary,
+                  style: const pw.TextStyle(
+                    fontSize: 12,
+                    color: PdfColors.grey700,
+                  ),
+                ),
               pw.SizedBox(height: 12),
               ...chartWidgets,
               pw.SizedBox(height: 12),
               _bpStatsTable(bpStats),
-              if (_mode == _ViewMode.compare && _seriesA != null && _seriesB != null && aStats != null && bStats != null) ...[
+              if (_mode == _ViewMode.compare &&
+                  _seriesA != null &&
+                  _seriesB != null &&
+                  aStats != null &&
+                  bStats != null) ...[
                 pw.SizedBox(height: 12),
                 _compareDeltaTable(aStats, bStats),
               ],
               pw.SizedBox(height: 12),
               if (_mode != _ViewMode.compare) ...[
                 pw.Text('Recent Readings (last 20)'),
-                pw.Table(border: pw.TableBorder.all(color: PdfColors.grey300), children: rows),
+                pw.Table(
+                  border: pw.TableBorder.all(color: PdfColors.grey300),
+                  children: rows,
+                ),
               ] else ...[
                 pw.Text('Recent Readings (A last 10)'),
-                pw.Table(border: pw.TableBorder.all(color: PdfColors.grey300), children: _rowsForSeries(_seriesA! , 10)),
+                pw.Table(
+                  border: pw.TableBorder.all(color: PdfColors.grey300),
+                  children: _rowsForSeries(_seriesA!, 10),
+                ),
                 pw.SizedBox(height: 8),
                 pw.Text('Recent Readings (B last 10)'),
-                pw.Table(border: pw.TableBorder.all(color: PdfColors.grey300), children: _rowsForSeries(_seriesB! , 10)),
+                pw.Table(
+                  border: pw.TableBorder.all(color: PdfColors.grey300),
+                  children: _rowsForSeries(_seriesB!, 10),
+                ),
               ],
             ];
           },
@@ -1617,48 +2224,188 @@ class _LatestBPPageState extends State<LatestBPPage> {
     } catch (e) {
       if (!mounted) return;
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('PDF export failed: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('PDF export failed: $e')));
     }
   }
 
   List<pw.TableRow> _rowsForSeries(List<_BPEntry> s, int take) {
     final rows = <pw.TableRow>[];
-    rows.add(pw.TableRow(children: [pw.Text('Date'), pw.Text('Time'), pw.Text('SBP'), pw.Text('DBP'), pw.Text('Pos'), pw.Text('Arm'), pw.Text('Source')]));
-    final list = [...s]..sort((a,b)=> (b.timestamp??DateTime(0)).compareTo(a.timestamp??DateTime(0)));
+    rows.add(
+      pw.TableRow(
+        children: [
+          pw.Text('Date'),
+          pw.Text('Time'),
+          pw.Text('SBP'),
+          pw.Text('DBP'),
+          pw.Text('Pos'),
+          pw.Text('Arm'),
+          pw.Text('Source'),
+        ],
+      ),
+    );
+    final list = [...s]
+      ..sort(
+        (a, b) =>
+            (b.timestamp ?? DateTime(0)).compareTo(a.timestamp ?? DateTime(0)),
+      );
     for (final e in list.take(take)) {
       final bg = _pdfBgForBp(e);
       final ann = _annotationFor(e.timestamp);
-      rows.add(pw.TableRow(children: [
-        pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(_fmtDate(e.timestamp)) ),
-        pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(_fmtTime(e.timestamp)) ),
-        pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(e.systolic?.toStringAsFixed(0) ?? '-') ),
-        pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(e.diastolic?.toStringAsFixed(0) ?? '-') ),
-        pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(ann?.$1 ?? '-')),
-        pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(ann?.$2 ?? '-')),
-        pw.Container(color: bg, padding: const pw.EdgeInsets.all(2), child: pw.Text(e.source ?? '')), 
-      ]));
+      rows.add(
+        pw.TableRow(
+          children: [
+            pw.Container(
+              color: bg,
+              padding: const pw.EdgeInsets.all(2),
+              child: pw.Text(_fmtDate(e.timestamp)),
+            ),
+            pw.Container(
+              color: bg,
+              padding: const pw.EdgeInsets.all(2),
+              child: pw.Text(_fmtTime(e.timestamp)),
+            ),
+            pw.Container(
+              color: bg,
+              padding: const pw.EdgeInsets.all(2),
+              child: pw.Text(e.systolic?.toStringAsFixed(0) ?? '-'),
+            ),
+            pw.Container(
+              color: bg,
+              padding: const pw.EdgeInsets.all(2),
+              child: pw.Text(e.diastolic?.toStringAsFixed(0) ?? '-'),
+            ),
+            pw.Container(
+              color: bg,
+              padding: const pw.EdgeInsets.all(2),
+              child: pw.Text(ann?.$1 ?? '-'),
+            ),
+            pw.Container(
+              color: bg,
+              padding: const pw.EdgeInsets.all(2),
+              child: pw.Text(ann?.$2 ?? '-'),
+            ),
+            pw.Container(
+              color: bg,
+              padding: const pw.EdgeInsets.all(2),
+              child: pw.Text(e.source ?? ''),
+            ),
+          ],
+        ),
+      );
     }
     return rows;
   }
 
   pw.Widget _compareDeltaTable(_BpStats a, _BpStats b) {
-    double? diff(double? x, double? y) => (x != null && y != null) ? (y - x) : null; // B - A
+    double? diff(double? x, double? y) =>
+        (x != null && y != null) ? (y - x) : null; // B - A
     String f(double? v, {int d = 0, bool signed = true}) {
       if (v == null) return '-';
       final s = v.toStringAsFixed(d);
       return signed && v >= 0 ? '+$s' : s;
     }
-    return pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-      pw.Text('Compare Summaries (B - A)', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-      pw.SizedBox(height: 6),
-      pw.Table(border: pw.TableBorder.all(color: PdfColors.grey300), children: [
-        pw.TableRow(children: [pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('Metric')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('ΔSBP')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('ΔDBP'))]),
-        pw.TableRow(children: [pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('Day mean')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(diff(a.dayMeanS, b.dayMeanS))} mmHg')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(diff(a.dayMeanD, b.dayMeanD))} mmHg'))]),
-        pw.TableRow(children: [pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('Night mean')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(diff(a.nightMeanS, b.nightMeanS))} mmHg')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(diff(a.nightMeanD, b.nightMeanD))} mmHg'))]),
-        pw.TableRow(children: [pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('Dipping')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(diff(a.dipS, b.dipS), d: 1)}%')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(diff(a.dipD, b.dipD), d: 1)}%'))]),
-        pw.TableRow(children: [pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('Morning surge')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(diff(a.morningSurgeS, b.morningSurgeS))} mmHg')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(diff(a.morningSurgeD, b.morningSurgeD))} mmHg'))]),
-      ]),
-    ]);
+
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Text(
+          'Compare Summaries (B - A)',
+          style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+        ),
+        pw.SizedBox(height: 6),
+        pw.Table(
+          border: pw.TableBorder.all(color: PdfColors.grey300),
+          children: [
+            pw.TableRow(
+              children: [
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('Metric'),
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('ΔSBP'),
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('ΔDBP'),
+                ),
+              ],
+            ),
+            pw.TableRow(
+              children: [
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('Day mean'),
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('${f(diff(a.dayMeanS, b.dayMeanS))} mmHg'),
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('${f(diff(a.dayMeanD, b.dayMeanD))} mmHg'),
+                ),
+              ],
+            ),
+            pw.TableRow(
+              children: [
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('Night mean'),
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('${f(diff(a.nightMeanS, b.nightMeanS))} mmHg'),
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('${f(diff(a.nightMeanD, b.nightMeanD))} mmHg'),
+                ),
+              ],
+            ),
+            pw.TableRow(
+              children: [
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('Dipping'),
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('${f(diff(a.dipS, b.dipS), d: 1)}%'),
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('${f(diff(a.dipD, b.dipD), d: 1)}%'),
+                ),
+              ],
+            ),
+            pw.TableRow(
+              children: [
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('Morning surge'),
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text(
+                    '${f(diff(a.morningSurgeS, b.morningSurgeS))} mmHg',
+                  ),
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text(
+                    '${f(diff(a.morningSurgeD, b.morningSurgeD))} mmHg',
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ],
+    );
   }
 
   Future<void> _requestPermsManually() async {
@@ -1670,12 +2417,18 @@ class _LatestBPPageState extends State<LatestBPPage> {
       } else {
         if (!mounted) return;
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Permission still not granted. Open Health Connect.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Permission still not granted. Open Health Connect.'),
+          ),
+        );
       }
     } catch (e) {
       if (!mounted) return;
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Permission error: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Permission error: $e')));
     }
   }
 
@@ -1686,14 +2439,19 @@ class _LatestBPPageState extends State<LatestBPPage> {
     } catch (e) {
       if (!mounted) return;
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Unable to open Health Connect: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to open Health Connect: $e')),
+      );
     }
   }
 
   // ---- PDF helpers and chart capture ----
   PdfColor _pdfBgForBp(_BPEntry e) {
-    final s = e.systolic ?? 0; final d = e.diastolic ?? 0;
-    if (s >= 180 || d >= 120) return PdfColor.fromInt(0xFFFFEBEE); // dark red tint
+    final s = e.systolic ?? 0;
+    final d = e.diastolic ?? 0;
+    if (s >= 180 || d >= 120) {
+      return PdfColor.fromInt(0xFFFFEBEE); // dark red tint
+    }
     if (s >= 140 || d >= 90) return PdfColor.fromInt(0xFFFFEBEE); // red tint
     if (s >= 130) return PdfColor.fromInt(0xFFFFF3E0); // orange tint
     if (s >= 120) return PdfColor.fromInt(0xFFFFFDE7); // yellow tint
@@ -1705,7 +2463,11 @@ class _LatestBPPageState extends State<LatestBPPage> {
   Future<void> _saveBpAnnotation(DateTime t, String pos, String arm) async {
     final prefs = await SharedPreferences.getInstance();
     final list = prefs.getStringList('bp_annotations') ?? <String>[];
-    final entry = jsonEncode({'t': t.toIso8601String(), 'pos': pos, 'arm': arm});
+    final entry = jsonEncode({
+      't': t.toIso8601String(),
+      'pos': pos,
+      'arm': arm,
+    });
     list.add(entry);
     await prefs.setStringList('bp_annotations', list);
   }
@@ -1732,10 +2494,12 @@ class _LatestBPPageState extends State<LatestBPPage> {
     // So call getInstance synchronously by accessing then() is cumbersome; instead we cache globally.
     // For simplicity, keep a static cache on first call in this frame using a Future.
     // Implement a simple blocking-like method by using a Zone microtask—here we accept a small risk and return null if unavailable.
-    return _annotations.firstWhere(
-      (ann) => (ann.t.difference(t).inSeconds).abs() <= 60,
-      orElse: () => _BpAnn.empty,
-    ).toTuple();
+    return _annotations
+        .firstWhere(
+          (ann) => (ann.t.difference(t).inSeconds).abs() <= 60,
+          orElse: () => _BpAnn.empty,
+        )
+        .toTuple();
   }
 
   List<_BpAnn> _annotations = const [];
@@ -1746,11 +2510,13 @@ class _LatestBPPageState extends State<LatestBPPage> {
     for (final s in list) {
       try {
         final m = jsonDecode(s) as Map<String, dynamic>;
-        out.add(_BpAnn(
-          t: DateTime.parse(m['t'] as String),
-          pos: (m['pos'] as String?) ?? '',
-          arm: (m['arm'] as String?) ?? '',
-        ));
+        out.add(
+          _BpAnn(
+            t: DateTime.parse(m['t'] as String),
+            pos: (m['pos'] as String?) ?? '',
+            arm: (m['arm'] as String?) ?? '',
+          ),
+        );
       } catch (_) {}
     }
     _annotations = out;
@@ -1761,24 +2527,29 @@ class _LatestBPPageState extends State<LatestBPPage> {
   String _secondarySummaryText() {
     if (_secondMetric == 'none') return '';
     if (_secondMetric == 'steps') {
-      final sum = _secSeries.fold<double>(0, (a,b)=> a + b.value);
+      final sum = _secSeries.fold<double>(0, (a, b) => a + b.value);
       return 'Steps (total): ${sum.toStringAsFixed(0)}';
     }
     if (_secondMetric == 'sleep') {
-      final sum = _secSeries.fold<double>(0, (a,b)=> a + b.value);
+      final sum = _secSeries.fold<double>(0, (a, b) => a + b.value);
       return 'Sleep (total minutes): ${sum.toStringAsFixed(0)}';
     }
     if (_secondMetric == 'energy') {
-      final sum = _secSeries.fold<double>(0, (a,b)=> a + b.value);
+      final sum = _secSeries.fold<double>(0, (a, b) => a + b.value);
       return 'Active energy (total): ${sum.toStringAsFixed(0)} kcal';
     }
     if (_secondMetric == 'workouts') {
-      final sum = _secSeries.fold<double>(0, (a,b)=> a + b.value);
+      final sum = _secSeries.fold<double>(0, (a, b) => a + b.value);
       return 'Exercise time (total): ${sum.toStringAsFixed(0)} min';
     }
     if (_secSeries.isNotEmpty) {
-      final mean = _secSeries.fold<double>(0, (a,b)=> a + b.value)/_secSeries.length;
-      final label = (_secondMetric == 'resting_hr') ? 'Resting HR' : (_secondMetric == 'hr' ? 'Heart Rate' : (_secondMetric == 'hrv_sdnn' ? 'HRV SDNN' : 'HRV RMSSD'));
+      final mean =
+          _secSeries.fold<double>(0, (a, b) => a + b.value) / _secSeries.length;
+      final label = (_secondMetric == 'resting_hr')
+          ? 'Resting HR'
+          : (_secondMetric == 'hr'
+                ? 'Heart Rate'
+                : (_secondMetric == 'hrv_sdnn' ? 'HRV SDNN' : 'HRV RMSSD'));
       return '$label (mean): ${mean.toStringAsFixed(0)}';
     }
     return '';
@@ -1786,7 +2557,11 @@ class _LatestBPPageState extends State<LatestBPPage> {
 
   // ------- Summary stats helpers -------
   Future<_BpStats> _bpStatsForSeries(List<_BPEntry> s) async {
-    final pts = s.map((e)=> met.BpPoint(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList();
+    final pts = s
+        .map(
+          (e) => met.BpPoint(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic),
+        )
+        .toList();
     final params = met.SurgeParams(
       morningWindowHours: _surgeMorningWindowHours,
       troughWindowHours: _surgeTroughWindowHours,
@@ -1796,12 +2571,20 @@ class _LatestBPPageState extends State<LatestBPPage> {
       wakeEarliestHour: _surgeWakeEarliestHour,
       wakeLatestHour: _surgeWakeLatestHour,
     );
-    final st = await met.computeBpStats(points: pts, health: _health, params: params);
+    final st = await met.computeBpStats(
+      points: pts,
+      health: _health,
+      params: params,
+    );
     return _BpStats(
-      dayMeanS: st.dayMeanS, nightMeanS: st.nightMeanS,
-      dayMeanD: st.dayMeanD, nightMeanD: st.nightMeanD,
-      dipS: st.dipS, dipD: st.dipD,
-      morningSurgeS: st.morningSurgeS, morningSurgeD: st.morningSurgeD,
+      dayMeanS: st.dayMeanS,
+      nightMeanS: st.nightMeanS,
+      dayMeanD: st.dayMeanD,
+      nightMeanD: st.nightMeanD,
+      dipS: st.dipS,
+      dipD: st.dipD,
+      morningSurgeS: st.morningSurgeS,
+      morningSurgeD: st.morningSurgeD,
       morningSurgeStrictSts: st.morningSurgeStrictSts,
       morningSurgeStrictPrewake: st.morningSurgeStrictPrewake,
     );
@@ -1809,34 +2592,155 @@ class _LatestBPPageState extends State<LatestBPPage> {
 
   pw.Widget _bpStatsTable(_BpStats st) {
     String f(double? v, {int d = 0}) => v == null ? '-' : v.toStringAsFixed(d);
-    return pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-      pw.Text('Summary (Day vs Night; dipping; morning surge)', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-      pw.SizedBox(height: 6),
-      pw.Table(border: pw.TableBorder.all(color: PdfColors.grey300), children: [
-        pw.TableRow(children: [pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('Metric')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('SBP')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('DBP'))]),
-        pw.TableRow(children: [pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('Day mean')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(st.dayMeanS)} mmHg')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(st.dayMeanD)} mmHg'))]),
-        pw.TableRow(children: [pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('Night mean')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(st.nightMeanS)} mmHg')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(st.nightMeanD)} mmHg'))]),
-        pw.TableRow(children: [pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('Dipping')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(st.dipS, d: 1)}%')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(st.dipD, d: 1)}%'))]),
-        pw.TableRow(children: [pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('Morning surge')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(st.morningSurgeS)} mmHg')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(st.morningSurgeD)} mmHg'))]),
-        if (st.morningSurgeStrictSts != null)
-          pw.TableRow(children: [pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('STS (strict)')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(st.morningSurgeStrictSts)} mmHg')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('-'))]),
-        if (st.morningSurgeStrictPrewake != null)
-          pw.TableRow(children: [pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('Prewaking (strict)')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('${f(st.morningSurgeStrictPrewake)} mmHg')), pw.Container(padding: const pw.EdgeInsets.all(4), child: pw.Text('-'))]),
-      ]),
-    ]);
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Text(
+          'Summary (Day vs Night; dipping; morning surge)',
+          style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+        ),
+        pw.SizedBox(height: 6),
+        pw.Table(
+          border: pw.TableBorder.all(color: PdfColors.grey300),
+          children: [
+            pw.TableRow(
+              children: [
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('Metric'),
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('SBP'),
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('DBP'),
+                ),
+              ],
+            ),
+            pw.TableRow(
+              children: [
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('Day mean'),
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('${f(st.dayMeanS)} mmHg'),
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('${f(st.dayMeanD)} mmHg'),
+                ),
+              ],
+            ),
+            pw.TableRow(
+              children: [
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('Night mean'),
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('${f(st.nightMeanS)} mmHg'),
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('${f(st.nightMeanD)} mmHg'),
+                ),
+              ],
+            ),
+            pw.TableRow(
+              children: [
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('Dipping'),
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('${f(st.dipS, d: 1)}%'),
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('${f(st.dipD, d: 1)}%'),
+                ),
+              ],
+            ),
+            pw.TableRow(
+              children: [
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('Morning surge'),
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('${f(st.morningSurgeS)} mmHg'),
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(4),
+                  child: pw.Text('${f(st.morningSurgeD)} mmHg'),
+                ),
+              ],
+            ),
+            if (st.morningSurgeStrictSts != null)
+              pw.TableRow(
+                children: [
+                  pw.Container(
+                    padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text('STS (strict)'),
+                  ),
+                  pw.Container(
+                    padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text('${f(st.morningSurgeStrictSts)} mmHg'),
+                  ),
+                  pw.Container(
+                    padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text('-'),
+                  ),
+                ],
+              ),
+            if (st.morningSurgeStrictPrewake != null)
+              pw.TableRow(
+                children: [
+                  pw.Container(
+                    padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text('Prewaking (strict)'),
+                  ),
+                  pw.Container(
+                    padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text('${f(st.morningSurgeStrictPrewake)} mmHg'),
+                  ),
+                  pw.Container(
+                    padding: const pw.EdgeInsets.all(4),
+                    child: pw.Text('-'),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ],
+    );
   }
 
   String? _hrHrvSummaryHeader() {
     List<double> vals = [];
     String? label;
-    if (_secondMetric == 'hr' || _secondMetric == 'resting_hr' || _secondMetric == 'hrv_sdnn' || _secondMetric == 'hrv_rmssd') {
+    if (_secondMetric == 'hr' ||
+        _secondMetric == 'resting_hr' ||
+        _secondMetric == 'hrv_sdnn' ||
+        _secondMetric == 'hrv_rmssd') {
       if (_mode == _ViewMode.averageDay && _secSamples.isNotEmpty) {
         vals = _secSamples.map((e) => e.v).toList();
       } else if (_secSeries.isNotEmpty) {
         vals = _secSeries.map((e) => e.value).toList();
       }
       if (vals.isNotEmpty) {
-        label = _secondMetric == 'hr' ? 'HR' : (_secondMetric == 'resting_hr' ? 'Resting HR' : (_secondMetric == 'hrv_sdnn' ? 'HRV SDNN' : 'HRV RMSSD'));
+        label = _secondMetric == 'hr'
+            ? 'HR'
+            : (_secondMetric == 'resting_hr'
+                  ? 'Resting HR'
+                  : (_secondMetric == 'hrv_sdnn' ? 'HRV SDNN' : 'HRV RMSSD'));
       }
     }
     if (vals.isEmpty || label == null) return null;
@@ -1848,19 +2752,22 @@ class _LatestBPPageState extends State<LatestBPPage> {
       if (i + 1 < vals.length) return vals[i] * (1 - frac) + vals[i + 1] * frac;
       return vals[i];
     }
-    final mean = vals.reduce((a,b)=>a+b) / vals.length;
+
+    final mean = vals.reduce((a, b) => a + b) / vals.length;
     final q25 = q(0.25), q50 = q(0.50), q75 = q(0.75);
     final iqr = q75 - q25;
-    String unit = (_secondMetric == 'hr' || _secondMetric == 'resting_hr') ? 'bpm' : 'ms';
+    String unit = (_secondMetric == 'hr' || _secondMetric == 'resting_hr')
+        ? 'bpm'
+        : 'ms';
     return '$label: mean ${mean.toStringAsFixed(0)} $unit; median ${q50.toStringAsFixed(0)}; IQR ${iqr.toStringAsFixed(0)}';
   }
 
   // ---- Strict morning surge (heuristics) ----
 
   final GlobalKey _trendChartKey = GlobalKey(); // visible trend
-  final GlobalKey _avgChartKey = GlobalKey();   // visible average-day
+  final GlobalKey _avgChartKey = GlobalKey(); // visible average-day
   final GlobalKey _trendChartKeyCapture = GlobalKey(); // hidden capture-only
-  final GlobalKey _avgChartKeyCapture = GlobalKey();   // hidden capture-only
+  final GlobalKey _avgChartKeyCapture = GlobalKey(); // hidden capture-only
   final GlobalKey _compareChartKey = GlobalKey();
 
   GlobalKey? _chartKeyForMode() {
@@ -1872,12 +2779,15 @@ class _LatestBPPageState extends State<LatestBPPage> {
 
   Future<Uint8List?> _captureChartPng(GlobalKey key) async {
     try {
-      final rb = key.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      final rb =
+          key.currentContext?.findRenderObject() as RenderRepaintBoundary?;
       if (rb == null) return null;
       final img = await rb.toImage(pixelRatio: 3.0);
       final data = await img.toByteData(format: ui.ImageByteFormat.png);
       return data?.buffer.asUint8List();
-    } catch (_) { return null; }
+    } catch (_) {
+      return null;
+    }
   }
 }
 
@@ -1888,21 +2798,26 @@ class _LatestTable extends StatelessWidget {
   Widget build(BuildContext context) {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-      child: DataTable(columns: const [
-        DataColumn(label: Text('Date')),
-        DataColumn(label: Text('Time')),
-        DataColumn(label: Text('Systolic (mmHg)')),
-        DataColumn(label: Text('Diastolic (mmHg)')),
-        DataColumn(label: Text('Source')),
-      ], rows: [
-        DataRow(cells: [
-          DataCell(Text(_formatDate(entry?.timestamp))),
-          DataCell(Text(_formatTime(entry?.timestamp))),
-          DataCell(Text(entry?.systolic?.toStringAsFixed(0) ?? '-')),
-          DataCell(Text(entry?.diastolic?.toStringAsFixed(0) ?? '-')),
-          DataCell(Text(entry?.source ?? '-')),
-        ])
-      ]),
+      child: DataTable(
+        columns: const [
+          DataColumn(label: Text('Date')),
+          DataColumn(label: Text('Time')),
+          DataColumn(label: Text('Systolic (mmHg)')),
+          DataColumn(label: Text('Diastolic (mmHg)')),
+          DataColumn(label: Text('Source')),
+        ],
+        rows: [
+          DataRow(
+            cells: [
+              DataCell(Text(_formatDate(entry?.timestamp))),
+              DataCell(Text(_formatTime(entry?.timestamp))),
+              DataCell(Text(entry?.systolic?.toStringAsFixed(0) ?? '-')),
+              DataCell(Text(entry?.diastolic?.toStringAsFixed(0) ?? '-')),
+              DataCell(Text(entry?.source ?? '-')),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -1921,22 +2836,7 @@ class _LatestTable extends StatelessWidget {
   }
 }
 
-class _NumField extends StatelessWidget {
-  final String label;
-  final int value;
-  final ValueChanged<int> onChanged;
-  const _NumField({required this.label, required this.value, required this.onChanged});
-  @override
-  Widget build(BuildContext context) {
-    final ctl = TextEditingController(text: value.toString());
-    return TextField(
-      controller: ctl,
-      keyboardType: const TextInputType.numberWithOptions(signed: false, decimal: false),
-      decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
-      onSubmitted: (s){ final v = int.tryParse(s.trim()); if (v!=null) onChanged(v); },
-    );
-  }
-}
+// _NumField removed (now provided within AdvancedSettingsSheet)
 
 class _BPEntry {
   final DateTime? timestamp;
@@ -1953,7 +2853,11 @@ class _BpAnn {
   final String pos;
   final String arm;
   const _BpAnn({required this.t, required this.pos, required this.arm});
-  static final empty = _BpAnn(t: DateTime.fromMillisecondsSinceEpoch(0), pos: '', arm: '');
+  static final empty = _BpAnn(
+    t: DateTime.fromMillisecondsSinceEpoch(0),
+    pos: '',
+    arm: '',
+  );
   (String, String)? toTuple() {
     if (pos.isEmpty && arm.isEmpty) return null;
     return (_posLabelStatic(pos), _armLabelStatic(arm));
@@ -1961,18 +2865,27 @@ class _BpAnn {
 
   static String _posLabelStatic(String code) {
     switch (code) {
-      case 'sitting': return 'Sitting';
-      case 'standing': return 'Standing';
-      case 'supine': return 'Supine';
-      default: return '-';
+      case 'sitting':
+        return 'Sitting';
+      case 'standing':
+        return 'Standing';
+      case 'supine':
+        return 'Supine';
+      default:
+        return '-';
     }
   }
+
   static String _armLabelStatic(String code) {
     switch (code) {
-      case 'left_upper_arm': return 'Left UA';
-      case 'right_upper_arm': return 'Right UA';
-      case 'wrist': return 'Wrist';
-      default: return '-';
+      case 'left_upper_arm':
+        return 'Left UA';
+      case 'right_upper_arm':
+        return 'Right UA';
+      case 'wrist':
+        return 'Wrist';
+      default:
+        return '-';
     }
   }
 }
@@ -2287,9 +3200,12 @@ class _BpAnn {
 } */
 
 class _Event {
-  final String id; final String title; final DateTime date;
+  final String id;
+  final String title;
+  final DateTime date;
   const _Event({required this.id, required this.title, required this.date});
-  _Event copyWith({String? title, DateTime? date}) => _Event(id: id, title: title ?? this.title, date: date ?? this.date);
+  _Event copyWith({String? title, DateTime? date}) =>
+      _Event(id: id, title: title ?? this.title, date: date ?? this.date);
 }
 
 class _EventChips extends StatelessWidget {
@@ -2298,28 +3214,45 @@ class _EventChips extends StatelessWidget {
   final Future<void> Function(_Event)? onTapA;
   final Future<void> Function(_Event)? onTapB;
   final Future<void> Function() onMore;
-  const _EventChips({required this.events, this.onTap, this.onTapA, this.onTapB, required this.onMore});
+  const _EventChips({
+    required this.events,
+    this.onTap,
+    this.onTapA,
+    this.onTapB,
+    required this.onMore,
+  });
   @override
   Widget build(BuildContext context) {
     if (events.isEmpty) return const SizedBox.shrink();
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-      child: Row(children: [
-        for (final e in events)
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: onTap != null
-                ? ActionChip(
-                    label: Text('${e.title} (${e.date.month}/${e.date.day})'),
-                    onPressed: () => onTap!(e),
-                  )
-                : Wrap(spacing: 6, children: [
-                    ActionChip(label: Text('A: ${e.title.split(' ').first}'), onPressed: onTapA!=null? ()=> onTapA!(e): null),
-                    ActionChip(label: Text('B: ${e.title.split(' ').first}'), onPressed: onTapB!=null? ()=> onTapB!(e): null),
-                  ]),
-          ),
-        ActionChip(label: const Text('More…'), onPressed: onMore),
-      ]),
+      child: Row(
+        children: [
+          for (final e in events)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: onTap != null
+                  ? ActionChip(
+                      label: Text('${e.title} (${e.date.month}/${e.date.day})'),
+                      onPressed: () => onTap!(e),
+                    )
+                  : Wrap(
+                      spacing: 6,
+                      children: [
+                        ActionChip(
+                          label: Text('A: ${e.title.split(' ').first}'),
+                          onPressed: onTapA != null ? () => onTapA!(e) : null,
+                        ),
+                        ActionChip(
+                          label: Text('B: ${e.title.split(' ').first}'),
+                          onPressed: onTapB != null ? () => onTapB!(e) : null,
+                        ),
+                      ],
+                    ),
+            ),
+          ActionChip(label: const Text('More…'), onPressed: onMore),
+        ],
+      ),
     );
   }
 }
@@ -2926,7 +3859,18 @@ class _BpStats {
   final double? morningSurgeD; // mmHg
   final double? morningSurgeStrictSts; // strict sleep-trough surge
   final double? morningSurgeStrictPrewake; // strict prewaking surge
-  const _BpStats({this.dayMeanS, this.nightMeanS, this.dayMeanD, this.nightMeanD, this.dipS, this.dipD, this.morningSurgeS, this.morningSurgeD, this.morningSurgeStrictSts, this.morningSurgeStrictPrewake});
+  const _BpStats({
+    this.dayMeanS,
+    this.nightMeanS,
+    this.dayMeanD,
+    this.nightMeanD,
+    this.dipS,
+    this.dipD,
+    this.morningSurgeS,
+    this.morningSurgeD,
+    this.morningSurgeStrictSts,
+    this.morningSurgeStrictPrewake,
+  });
 }
 
 // Strict surge logic moved to services/metrics.dart
@@ -2936,7 +3880,11 @@ class _LegendDot extends StatelessWidget {
   const _LegendDot({required this.color});
   @override
   Widget build(BuildContext context) {
-    return Container(width: 12, height: 12, decoration: BoxDecoration(color: color, shape: BoxShape.circle));
+    return Container(
+      width: 12,
+      height: 12,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    );
   }
 }
 
@@ -2945,7 +3893,12 @@ class _LegendToggle extends StatelessWidget {
   final String label;
   final bool enabled;
   final VoidCallback onTap;
-  const _LegendToggle({required this.color, required this.label, required this.enabled, required this.onTap});
+  const _LegendToggle({
+    required this.color,
+    required this.label,
+    required this.enabled,
+    required this.onTap,
+  });
   @override
   Widget build(BuildContext context) {
     int to255(double v) => (v * 255.0).round().clamp(0, 255);
@@ -2960,11 +3913,18 @@ class _LegendToggle extends StatelessWidget {
     final t = enabled ? null : Colors.black45;
     return InkWell(
       onTap: onTap,
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Container(width: 12, height: 12, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
-        const SizedBox(width: 6),
-        Text(label, style: TextStyle(color: t)),
-      ]),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 6),
+          Text(label, style: TextStyle(color: t)),
+        ],
+      ),
     );
   }
 }
@@ -2975,21 +3935,63 @@ class _SummaryCards extends StatelessWidget {
   final List<_BPEntry>? seriesA;
   final List<_BPEntry>? seriesB;
   final int? anchorMinute;
-  const _SummaryCards({required this.mode, required this.series, this.seriesA, this.seriesB, this.anchorMinute});
+  const _SummaryCards({
+    required this.mode,
+    required this.series,
+    this.seriesA,
+    this.seriesB,
+    this.anchorMinute,
+  });
 
   @override
   Widget build(BuildContext context) {
-    if (mode == _ViewMode.trend && series.isEmpty) return const SizedBox.shrink();
-    if (mode == _ViewMode.averageDay && series.isEmpty) return const SizedBox.shrink();
-    if (mode == _ViewMode.compare && (seriesA == null || seriesB == null)) return const SizedBox.shrink();
+    if (mode == _ViewMode.trend && series.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    if (mode == _ViewMode.averageDay && series.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    if (mode == _ViewMode.compare && (seriesA == null || seriesB == null)) {
+      return const SizedBox.shrink();
+    }
 
     late final List<_CardData> cards;
     if (mode == _ViewMode.compare) {
-      final aggA = avg.AverageDayAggregator(series: seriesA!.map((e)=> avg.AvgBpInput(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList()).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMinute);
-      final aggB = avg.AverageDayAggregator(series: seriesB!.map((e)=> avg.AvgBpInput(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList()).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMinute);
+      final aggA = avg.AverageDayAggregator(
+        series: seriesA!
+            .map(
+              (e) => avg.AvgBpInput(
+                t: e.timestamp,
+                sbp: e.systolic,
+                dbp: e.diastolic,
+              ),
+            )
+            .toList(),
+      ).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMinute);
+      final aggB = avg.AverageDayAggregator(
+        series: seriesB!
+            .map(
+              (e) => avg.AvgBpInput(
+                t: e.timestamp,
+                sbp: e.systolic,
+                dbp: e.diastolic,
+              ),
+            )
+            .toList(),
+      ).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMinute);
       cards = _buildCompareCards(aggA, aggB);
     } else {
-      final agg = avg.AverageDayAggregator(series: series.map((e)=> avg.AvgBpInput(t: e.timestamp, sbp: e.systolic, dbp: e.diastolic)).toList()).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMinute);
+      final agg = avg.AverageDayAggregator(
+        series: series
+            .map(
+              (e) => avg.AvgBpInput(
+                t: e.timestamp,
+                sbp: e.systolic,
+                dbp: e.diastolic,
+              ),
+            )
+            .toList(),
+      ).compute(stepMinutes: 15, smoothMinutes: 45, anchorMinute: anchorMinute);
       cards = _buildSingleCards(agg);
     }
 
@@ -3008,7 +4010,7 @@ class _SummaryCards extends StatelessWidget {
           title: s.label,
           sbp: _segMean(agg.minutes, agg.sysMean, s.startMin, s.endMin),
           dbp: _segMean(agg.minutes, agg.diaMean, s.startMin, s.endMin),
-        )
+        ),
     ];
   }
 
@@ -3018,26 +4020,56 @@ class _SummaryCards extends StatelessWidget {
       for (final s in segs)
         _CardData(
           title: s.label,
-          deltaSbp: _segDelta(a.minutes, a.sysMean, b.minutes, b.sysMean, s.startMin, s.endMin),
-          deltaDbp: _segDelta(a.minutes, a.diaMean, b.minutes, b.diaMean, s.startMin, s.endMin),
+          deltaSbp: _segDelta(
+            a.minutes,
+            a.sysMean,
+            b.minutes,
+            b.sysMean,
+            s.startMin,
+            s.endMin,
+          ),
+          deltaDbp: _segDelta(
+            a.minutes,
+            a.diaMean,
+            b.minutes,
+            b.diaMean,
+            s.startMin,
+            s.endMin,
+          ),
           isDelta: true,
-        )
+        ),
     ];
   }
 
-  double? _segMean(List<int> mins, List<double?> values, int startMin, int endMin) {
-    double sum = 0; int n = 0;
+  double? _segMean(
+    List<int> mins,
+    List<double?> values,
+    int startMin,
+    int endMin,
+  ) {
+    double sum = 0;
+    int n = 0;
     for (int i = 0; i < mins.length; i++) {
       final m = mins[i];
       if (_inSeg(m, startMin, endMin)) {
         final v = values[i];
-        if (v != null) { sum += v; n++; }
+        if (v != null) {
+          sum += v;
+          n++;
+        }
       }
     }
     return n > 0 ? sum / n : null;
   }
 
-  double? _segDelta(List<int> amins, List<double?> a, List<int> bmins, List<double?> b, int startMin, int endMin) {
+  double? _segDelta(
+    List<int> amins,
+    List<double?> a,
+    List<int> bmins,
+    List<double?> b,
+    int startMin,
+    int endMin,
+  ) {
     // assume same binning; align by minute index
     final meanA = _segMean(amins, a, startMin, endMin);
     final meanB = _segMean(bmins, b, startMin, endMin);
@@ -3046,7 +4078,9 @@ class _SummaryCards extends StatelessWidget {
   }
 
   bool _inSeg(int minuteOfDay, int startMin, int endMin) {
-    if (startMin <= endMin) return minuteOfDay >= startMin && minuteOfDay < endMin;
+    if (startMin <= endMin) {
+      return minuteOfDay >= startMin && minuteOfDay < endMin;
+    }
     // wrap
     return minuteOfDay >= startMin || minuteOfDay < endMin;
   }
@@ -3063,16 +4097,27 @@ class _SummaryCards extends StatelessWidget {
 }
 
 class _Segment {
-  final String label; final int startMin; final int endMin;
+  final String label;
+  final int startMin;
+  final int endMin;
   const _Segment(this.label, this.startMin, this.endMin);
 }
 
 class _CardData {
   final String title;
-  final double? sbp; final double? dbp; // for single
-  final double? deltaSbp; final double? deltaDbp; // for compare
+  final double? sbp;
+  final double? dbp; // for single
+  final double? deltaSbp;
+  final double? deltaDbp; // for compare
   final bool isDelta;
-  _CardData({required this.title, this.sbp, this.dbp, this.deltaSbp, this.deltaDbp, this.isDelta = false});
+  _CardData({
+    required this.title,
+    this.sbp,
+    this.dbp,
+    this.deltaSbp,
+    this.deltaDbp,
+    this.isDelta = false,
+  });
 }
 
 class _SummaryCard extends StatelessWidget {
@@ -3092,15 +4137,21 @@ class _SummaryCard extends StatelessWidget {
             Text(data.title, style: h),
             const SizedBox(height: 6),
             if (!data.isDelta)
-              Row(children: [
-                Text('SBP: ${_f(data.sbp)} mmHg'), const SizedBox(width: 12),
-                Text('DBP: ${_f(data.dbp)} mmHg'),
-              ])
+              Row(
+                children: [
+                  Text('SBP: ${_f(data.sbp)} mmHg'),
+                  const SizedBox(width: 12),
+                  Text('DBP: ${_f(data.dbp)} mmHg'),
+                ],
+              )
             else
-              Row(children: [
-                Text('ΔSBP: ${_fSigned(data.deltaSbp)} mmHg'), const SizedBox(width: 12),
-                Text('ΔDBP: ${_fSigned(data.deltaDbp)} mmHg'),
-              ]),
+              Row(
+                children: [
+                  Text('ΔSBP: ${_fSigned(data.deltaSbp)} mmHg'),
+                  const SizedBox(width: 12),
+                  Text('ΔDBP: ${_fSigned(data.deltaDbp)} mmHg'),
+                ],
+              ),
           ],
         ),
       ),
@@ -3108,7 +4159,9 @@ class _SummaryCard extends StatelessWidget {
   }
 
   String _f(double? v) => v == null ? '-' : v.toStringAsFixed(0);
-  String _fSigned(double? v) => v == null ? '-' : (v >= 0 ? '+${v.toStringAsFixed(0)}' : v.toStringAsFixed(0));
+  String _fSigned(double? v) => v == null
+      ? '-'
+      : (v >= 0 ? '+${v.toStringAsFixed(0)}' : v.toStringAsFixed(0));
 }
 
 class _ReadingsSection extends StatelessWidget {
@@ -3135,38 +4188,61 @@ class _ReadingsSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Recent Readings', style: TextStyle(fontWeight: FontWeight.bold)),
+        const Text(
+          'Recent Readings',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         const SizedBox(height: 8),
         if (mode != _ViewMode.compare)
           _buildList(context, entries)
         else ...[
           const Text('Range A'),
           const SizedBox(height: 6),
-          if (entriesA != null) _buildList(context, entriesA!) else const Text('-'),
+          if (entriesA != null)
+            _buildList(context, entriesA!)
+          else
+            const Text('-'),
           const SizedBox(height: 12),
           const Text('Range B'),
           const SizedBox(height: 6),
-          if (entriesB != null) _buildList(context, entriesB!) else const Text('-'),
+          if (entriesB != null)
+            _buildList(context, entriesB!)
+          else
+            const Text('-'),
         ],
         const SizedBox(height: 8),
-        Row(children: [
-          ElevatedButton.icon(
-            onPressed: loading ? null : onLoadMore,
-            icon: loading ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.history),
-            label: const Text('Load earlier (90 days)'),
-          ),
-        ]),
+        Row(
+          children: [
+            ElevatedButton.icon(
+              onPressed: loading ? null : onLoadMore,
+              icon: loading
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.history),
+              label: const Text('Load earlier (90 days)'),
+            ),
+          ],
+        ),
       ],
     );
   }
 
   Widget _buildList(BuildContext context, List<_BPEntry> src) {
     final list = [...src];
-    list.sort((a, b) => (b.timestamp ?? DateTime(0)).compareTo(a.timestamp ?? DateTime(0)));
+    list.sort(
+      (a, b) =>
+          (b.timestamp ?? DateTime(0)).compareTo(a.timestamp ?? DateTime(0)),
+    );
     final shown = list.take(limit).toList();
     return Container(
       constraints: const BoxConstraints(maxHeight: 360),
-      decoration: BoxDecoration(border: Border.all(color: Colors.black12), borderRadius: BorderRadius.circular(6)),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.black12),
+        borderRadius: BorderRadius.circular(6),
+      ),
       child: ListView.separated(
         itemCount: shown.length,
         itemBuilder: (context, i) {
@@ -3175,7 +4251,10 @@ class _ReadingsSection extends StatelessWidget {
             dense: true,
             title: Text(_fmtDate(e.timestamp)),
             subtitle: Text(_fmtTime(e.timestamp)),
-            trailing: Text(_bpText(e), style: const TextStyle(fontWeight: FontWeight.w600)),
+            trailing: Text(
+              _bpText(e),
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
           );
         },
         separatorBuilder: (_, __) => const Divider(height: 1),
@@ -3204,14 +4283,27 @@ class _ReadingsSection extends StatelessWidget {
   }
 }
 
-String _effectiveRangeLabel(List<_BPEntry> entries, DateTime start, DateTime end) {
-  final ts = entries.where((e) => e.timestamp != null).map((e) => e.timestamp!).toList()..sort();
+String _effectiveRangeLabel(
+  List<_BPEntry> entries,
+  DateTime start,
+  DateTime end,
+) {
+  final ts =
+      entries
+          .where((e) => e.timestamp != null)
+          .map((e) => e.timestamp!)
+          .toList()
+        ..sort();
   if (ts.isEmpty) {
     return 'Effective: —';
   }
   final effStart = ts.first.isAfter(start) ? ts.first : start;
   final effEnd = ts.last.isBefore(end) ? ts.last : end;
-  final daysWithReadings = ts.map((t) => DateTime(t.year, t.month, t.day)).toSet().length;
-  String fmt(DateTime d) => '${d.year}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')}';
+  final daysWithReadings = ts
+      .map((t) => DateTime(t.year, t.month, t.day))
+      .toSet()
+      .length;
+  String fmt(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
   return 'Effective: ${fmt(effStart)} — ${fmt(effEnd)}  •  $daysWithReadings day(s) with readings';
 }

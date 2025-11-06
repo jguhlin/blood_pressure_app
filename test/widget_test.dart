@@ -11,7 +11,9 @@ import 'package:blood_pressure_app/main.dart';
 
 void main() {
   testWidgets('Loads Latest Blood Pressure screen', (tester) async {
-    await tester.pumpWidget(const MaterialApp(home: LatestBPPage(autoFetch: false)));
+    await tester.pumpWidget(
+      const MaterialApp(home: LatestBPPage(autoFetch: false)),
+    );
     expect(find.text('Latest Blood Pressure'), findsOneWidget);
     expect(find.text('Systolic (mmHg)'), findsWidgets);
     expect(find.text('Diastolic (mmHg)'), findsWidgets);

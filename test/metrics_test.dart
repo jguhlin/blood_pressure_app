@@ -10,11 +10,16 @@ void main() {
       met.BpPoint(t: day.add(const Duration(hours: 7)), sbp: 130, dbp: 80),
       met.BpPoint(t: day.add(const Duration(hours: 8)), sbp: 126, dbp: 78),
     ];
-    final wakes = { DateTime(day.year, day.month, day.day): day.add(const Duration(hours: 6)) };
-    final p = const met.SurgeParams(morningWindowHours: 2, troughWindowHours: 6, prewakeHours: 2);
+    final wakes = {
+      DateTime(day.year, day.month, day.day): day.add(const Duration(hours: 6)),
+    };
+    final p = const met.SurgeParams(
+      morningWindowHours: 2,
+      troughWindowHours: 6,
+      prewakeHours: 2,
+    );
     final strict = await met.computeStrictWithWakeTimes(pts, wakes, p);
     expect(strict.sts, closeTo(20, 1e-6)); // 130 - 110
     expect(strict.prewake, isNotNull);
   });
 }
-
